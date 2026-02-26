@@ -6,6 +6,7 @@ Usage:
     python main.py predict     Generate predictions for today
     python main.py serve       Start the API server
     python main.py pipeline    Run the full daily pipeline once
+    python main.py analyze     Run IC analysis on all signals
 """
 
 import argparse
@@ -22,17 +23,12 @@ logging.basicConfig(
 logger = logging.getLogger("signalboard")
 
 
-def cmd_train(config: dict):
-    """Train the ML model using walk-forward validation."""
+def _build_features(config: dict):
+    """Shared feature-building pipeline used by train/backtest/predict."""
     from data.data_manager import DataManager
     from signals.combiner import SignalCombiner
-    from models.features import add_target, add_lag_features, add_rolling_features, prepare_train_data
-    from models.trainer import WalkForwardTrainer
+    from models.features import add_target, add_lag_features, add_rolling_features
 
-    logger.info("=== Training Pipeline ===")
-
-    # 1. Load data
-    logger.info("Loading data...")
     dm = DataManager(config)
     prices = dm.get_all_prices()
     fundamentals = dm.get_all_fundamentals()
@@ -40,35 +36,60 @@ def cmd_train(config: dict):
 
     logger.info("Loaded prices for %d tickers", len(prices))
 
-    # 2. Build feature matrix
-    logger.info("Building feature matrix...")
     combiner = SignalCombiner()
     fm = combiner.build_feature_matrix(prices, fundamentals, macro)
     fm = add_target(fm, prices, horizon_days=config["model"]["target_horizon_days"])
 
-    # 3. Add derived features
     key_signals = ["rsi_14", "macd_histogram", "momentum_5", "zscore_20"]
     fm = add_lag_features(fm, key_signals, lags=[1, 2, 5])
     fm = add_rolling_features(fm, key_signals, windows=[5, 10])
 
     logger.info("Feature matrix shape: %s", fm.shape)
+    return dm, prices, fundamentals, macro, fm
 
-    # 4. Prepare training data
+
+def cmd_train(config: dict):
+    """Train the ML model using walk-forward validation with optional feature selection."""
+    from models.features import prepare_train_data
+    from models.trainer import WalkForwardTrainer
+    from models.feature_selection import select_features, feature_importance_report
+    from models.calibration import ProbabilityCalibrator
+    from models.regime_detection import adversarial_validation
+
+    logger.info("=== Training Pipeline ===")
+
+    # 1. Load data and build features
+    logger.info("Loading data and building features...")
+    dm, prices, fundamentals, macro, fm = _build_features(config)
+
+    # 2. Prepare training data
     X, y_return, y_class = prepare_train_data(fm)
     logger.info("Training samples: %d, features: %d", len(X), len(X.columns))
 
-    # 5. Train
+    # 3. Feature selection (MI + correlation pruning)
+    logger.info("Running feature selection...")
+    selected_features = select_features(X, y_class, mi_threshold=0.005, corr_threshold=0.90)
+    logger.info("Selected %d / %d features", len(selected_features), len(X.columns))
+
+    # Log top features
+    report = feature_importance_report(X[selected_features], y_class)
+    for _, row in report.head(10).iterrows():
+        logger.info("  Feature: %-30s  MI=%.4f  Corr=%.4f", row["feature"], row["mi_score"], row["abs_corr_target"])
+
+    X_selected = X[selected_features]
+
+    # 4. Train with walk-forward
     trainer = WalkForwardTrainer(
         train_window_years=config["model"]["train_window_years"],
         val_window_months=config["model"]["validation_window_months"],
     )
-    model, results = trainer.walk_forward_train(X, y_class)
+    models, results = trainer.walk_forward_train(X_selected, y_class)
 
     if results:
         logger.info("Training complete: %d folds", len(results))
-        for r in results[-3:]:  # Show last 3 folds
+        for r in results[-3:]:
             logger.info(
-                "  Fold %d: acc=%.3f, f1=%.3f, prec_up=%.3f [%s → %s]",
+                "  Fold %d: acc=%.3f, f1=%.3f, prec_up=%.3f [%s -> %s]",
                 r.fold, r.accuracy, r.f1, r.precision_up,
                 r.val_start, r.val_end,
             )
@@ -78,28 +99,13 @@ def cmd_train(config: dict):
 
 def cmd_backtest(config: dict):
     """Run a full backtest."""
-    from data.data_manager import DataManager
-    from signals.combiner import SignalCombiner
     from models.features import add_target, add_lag_features, add_rolling_features
     from models.registry import ModelRegistry
     from backtest.engine import BacktestEngine
     from backtest.report import generate_report
 
     logger.info("=== Backtest ===")
-
-    # Load data
-    dm = DataManager(config)
-    prices = dm.get_all_prices()
-    fundamentals = dm.get_all_fundamentals()
-    macro = dm.get_macro()
-
-    # Build features
-    combiner = SignalCombiner()
-    fm = combiner.build_feature_matrix(prices, fundamentals, macro)
-    fm = add_target(fm, prices, horizon_days=config["model"]["target_horizon_days"])
-    key_signals = ["rsi_14", "macd_histogram", "momentum_5", "zscore_20"]
-    fm = add_lag_features(fm, key_signals, lags=[1, 2, 5])
-    fm = add_rolling_features(fm, key_signals, windows=[5, 10])
+    dm, prices, fundamentals, macro, fm = _build_features(config)
 
     # Load model
     registry = ModelRegistry()
@@ -124,25 +130,11 @@ def cmd_backtest(config: dict):
 
 def cmd_predict(config: dict):
     """Generate predictions for the latest available date."""
-    from data.data_manager import DataManager
-    from signals.combiner import SignalCombiner
-    from models.features import add_target, add_lag_features, add_rolling_features
     from models.registry import ModelRegistry
     from models.predict import predict_latest
 
     logger.info("=== Generating Predictions ===")
-
-    dm = DataManager(config)
-    prices = dm.get_all_prices()
-    fundamentals = dm.get_all_fundamentals()
-    macro = dm.get_macro()
-
-    combiner = SignalCombiner()
-    fm = combiner.build_feature_matrix(prices, fundamentals, macro)
-    fm = add_target(fm, prices, horizon_days=config["model"]["target_horizon_days"])
-    key_signals = ["rsi_14", "macd_histogram", "momentum_5", "zscore_20"]
-    fm = add_lag_features(fm, key_signals, lags=[1, 2, 5])
-    fm = add_rolling_features(fm, key_signals, windows=[5, 10])
+    dm, prices, fundamentals, macro, fm = _build_features(config)
 
     registry = ModelRegistry()
     model = registry.load()
@@ -162,6 +154,35 @@ def cmd_predict(config: dict):
             )
 
 
+def cmd_analyze(config: dict):
+    """Run IC analysis on all signals to evaluate predictive power."""
+    from models.features import prepare_train_data
+    from signals.ic_analysis import ic_analysis_report, turnover_analysis
+
+    logger.info("=== Signal IC Analysis ===")
+    dm, prices, fundamentals, macro, fm = _build_features(config)
+
+    X, y_return, y_class = prepare_train_data(fm)
+
+    # IC against forward returns
+    report = ic_analysis_report(X, y_return, method="rank")
+
+    logger.info("Top 20 features by Information Coefficient:")
+    for _, row in report.head(20).iterrows():
+        ic_ir_str = f"IR={row['ic_ir']:.2f}" if row['ic_ir'] else "IR=N/A"
+        logger.info(
+            "  %-35s  IC=%+.4f  t=%.2f  p=%.4f  %s",
+            row["feature"], row["ic"], row["t_stat"], row["p_value"], ic_ir_str,
+        )
+
+    # Signal turnover for top features
+    logger.info("\nSignal Turnover (top 10):")
+    for feat in report.head(10)["feature"]:
+        if feat in X.columns:
+            to = turnover_analysis(X[feat])
+            logger.info("  %-35s  turnover=%.4f", feat, to if to == to else 0)
+
+
 def cmd_serve(config: dict):
     """Start the FastAPI server."""
     from server.app import main as run_server
@@ -179,7 +200,7 @@ def main():
     parser = argparse.ArgumentParser(description="SignalBoard — Algorithmic Trading Signals")
     parser.add_argument(
         "command",
-        choices=["train", "backtest", "predict", "serve", "pipeline"],
+        choices=["train", "backtest", "predict", "serve", "pipeline", "analyze"],
         help="Command to run",
     )
     parser.add_argument(
@@ -197,6 +218,7 @@ def main():
         "predict": cmd_predict,
         "serve": cmd_serve,
         "pipeline": cmd_pipeline,
+        "analyze": cmd_analyze,
     }
     commands[args.command](config)
 

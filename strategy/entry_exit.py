@@ -1,7 +1,8 @@
-"""Entry and exit rule engine."""
+"""Entry and exit rule engine with ATR-adaptive stop levels."""
 
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 
 from models.predict import Prediction
@@ -18,11 +19,23 @@ class TradeSignal:
 
 
 class EntryExitEngine:
-    """Evaluate entry and exit conditions."""
+    """Evaluate entry and exit conditions with ATR-adaptive stops.
+
+    Stop levels scale with each asset's own volatility (ATR) instead of
+    using fixed percentages, so a high-vol stock like NVDA gets wider stops
+    while a low-vol stock like KO gets tighter ones.
+    """
+
+    # ATR multipliers for stop calculations
+    STOP_ATR_MULT = 2.0       # stop loss = entry - ATR * 2
+    TARGET_ATR_MULT = 3.0     # take profit = entry + ATR * 3
+    TRAIL_TRIGGER_ATR = 2.0   # trailing activates after ATR * 2 gain
+    TRAIL_DISTANCE_ATR = 1.5  # trail distance = ATR * 1.5
 
     def __init__(self, config: dict):
         strat = config["strategy"]
         self.min_confidence = strat["min_confidence_threshold"]
+        # Fixed pct fallbacks (used only when ATR is unavailable)
         self.take_profit_pct = strat["take_profit_pct"] / 100
         self.stop_loss_pct = strat["stop_loss_pct"] / 100
         self.trailing_trigger_pct = strat["trailing_stop_trigger_pct"] / 100
@@ -84,7 +97,8 @@ class EntryExitEngine:
     ) -> list[TradeSignal]:
         """Determine which positions should be closed.
 
-        Checks: take profit, stop loss, trailing stop, time stop, signal reversal.
+        Uses the per-position stop/target levels set at entry time (ATR-adaptive).
+        Also checks: trailing stop, time stop, signal reversal.
         """
         signals = []
         pred_map = {}
@@ -96,23 +110,23 @@ class EntryExitEngine:
             if price is None:
                 continue
 
-            pnl_pct = (price - pos.entry_price) / pos.entry_price
-
-            # Take profit
-            if pnl_pct >= self.take_profit_pct:
+            # Take profit — use the stored ATR-adaptive target
+            if price >= pos.take_profit:
+                pnl_pct = (price - pos.entry_price) / pos.entry_price
                 signals.append(TradeSignal(
                     ticker=ticker,
                     action="CLOSE",
-                    reason=f"Take profit hit: {pnl_pct:+.1%}",
+                    reason=f"Take profit hit: {pnl_pct:+.1%} (target ${pos.take_profit:.2f})",
                 ))
                 continue
 
-            # Stop loss
-            if pnl_pct <= -self.stop_loss_pct:
+            # Stop loss — use the stored ATR-adaptive stop
+            if price <= pos.stop_loss:
+                pnl_pct = (price - pos.entry_price) / pos.entry_price
                 signals.append(TradeSignal(
                     ticker=ticker,
                     action="CLOSE",
-                    reason=f"Stop loss hit: {pnl_pct:+.1%}",
+                    reason=f"Stop loss hit: {pnl_pct:+.1%} (stop ${pos.stop_loss:.2f})",
                 ))
                 continue
 
@@ -121,9 +135,15 @@ class EntryExitEngine:
                 pos.peak_price = pos.entry_price
             pos.peak_price = max(pos.peak_price, price)
 
-            if pnl_pct >= self.trailing_trigger_pct:
-                trail_price = pos.peak_price * (1 - self.trailing_distance_pct)
+            if price >= pos.trailing_stop_trigger:
+                trail_price = pos.peak_price - (pos.trailing_stop_trigger - pos.entry_price) * (
+                    self.TRAIL_DISTANCE_ATR / self.TRAIL_TRIGGER_ATR
+                )
+                # Only ratchet trailing stop upward
+                if pos.trailing_stop_price is not None:
+                    trail_price = max(trail_price, pos.trailing_stop_price)
                 pos.trailing_stop_price = trail_price
+
                 if price <= trail_price:
                     signals.append(TradeSignal(
                         ticker=ticker,
@@ -154,10 +174,23 @@ class EntryExitEngine:
         return signals
 
     def compute_stop_levels(
-        self, entry_price: float
+        self, entry_price: float, atr: float | None = None,
     ) -> tuple[float, float, float]:
-        """Return (stop_loss, take_profit, trailing_trigger) prices."""
-        stop = entry_price * (1 - self.stop_loss_pct)
-        target = entry_price * (1 + self.take_profit_pct)
-        trail_trigger = entry_price * (1 + self.trailing_trigger_pct)
+        """Return (stop_loss, take_profit, trailing_trigger) prices.
+
+        When ATR is available, levels are adaptive to the asset's volatility:
+            stop = entry - ATR * 2.0
+            target = entry + ATR * 3.0  (1.5:1 reward/risk)
+            trail_trigger = entry + ATR * 2.0
+
+        Falls back to fixed-percentage levels when ATR is unavailable.
+        """
+        if atr is not None and atr > 0:
+            stop = entry_price - atr * self.STOP_ATR_MULT
+            target = entry_price + atr * self.TARGET_ATR_MULT
+            trail_trigger = entry_price + atr * self.TRAIL_TRIGGER_ATR
+        else:
+            stop = entry_price * (1 - self.stop_loss_pct)
+            target = entry_price * (1 + self.take_profit_pct)
+            trail_trigger = entry_price * (1 + self.trailing_trigger_pct)
         return stop, target, trail_trigger

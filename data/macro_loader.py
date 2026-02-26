@@ -11,11 +11,24 @@ CACHE_DIR = Path(__file__).parent / "cache" / "macro"
 SERIES = {
     "treasury_10y": "DGS10",       # 10-Year Treasury Yield
     "treasury_2y": "DGS2",         # 2-Year Treasury Yield
+    "treasury_3m": "DGS3MO",       # 3-Month Treasury Yield
     "fed_funds": "FEDFUNDS",       # Federal Funds Rate
     "vix": "VIXCLS",               # CBOE Volatility Index
     "unemployment": "UNRATE",      # Unemployment Rate
     "cpi": "CPIAUCSL",             # Consumer Price Index
     "oil_wti": "DCOILWTICO",       # WTI Crude Oil Price
+    # Credit spreads & financial conditions
+    "baa_spread": "BAAFFM",        # Moody's BAA Corporate Bond - Fed Funds Spread
+    "ted_spread": "TEDRATE",       # TED Spread (3M LIBOR - 3M T-Bill)
+    "ice_bofaml_hy": "BAMLH0A0HYM2",  # ICE BofA US High Yield Index OAS
+    "nfci": "NFCI",                # Chicago Fed National Financial Conditions Index
+    # Real economy
+    "initial_claims": "ICSA",      # Weekly Initial Jobless Claims
+    "retail_sales": "RSAFS",       # Advance Retail Sales
+    "industrial_prod": "INDPRO",   # Industrial Production Index
+    # Money & rates
+    "m2": "M2SL",                  # M2 Money Stock
+    "real_rate": "REAINTRATREARAT1YE",  # 1-Year Real Interest Rate
 }
 
 
