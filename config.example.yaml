@@ -1,0 +1,75 @@
+# Copy this file to config.yaml and fill in your API keys
+# config.yaml is gitignored — your keys stay local
+
+fred:
+  api_key: "YOUR_FRED_API_KEY"  # Get one free at https://fred.stlouisfed.org/docs/api/api_key.html
+
+universe:
+  # Top S&P 500 stocks by market cap — expand as needed
+  tickers:
+    - AAPL
+    - MSFT
+    - AMZN
+    - NVDA
+    - GOOGL
+    - META
+    - BRK-B
+    - JPM
+    - JNJ
+    - V
+    - UNH
+    - XOM
+    - PG
+    - MA
+    - HD
+    - CVX
+    - MRK
+    - ABBV
+    - PEP
+    - KO
+    - COST
+    - AVGO
+    - LLY
+    - WMT
+    - MCD
+    - CSCO
+    - ACN
+    - TMO
+    - ABT
+    - DHR
+  lookback_years: 10
+
+strategy:
+  max_positions: 20
+  max_position_size_pct: 10.0
+  max_sector_exposure_pct: 25.0
+  max_portfolio_drawdown_pct: 10.0
+  daily_loss_limit_pct: 2.0
+  take_profit_pct: 5.0
+  stop_loss_pct: 3.0
+  trailing_stop_trigger_pct: 3.0
+  trailing_stop_distance_pct: 1.5
+  time_stop_days: 15
+  min_confidence_threshold: 0.70
+  push_notification_threshold: 0.75
+
+model:
+  target_horizon_days: 5
+  train_window_years: 2
+  validation_window_months: 3
+  retrain_frequency_days: 30
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  database_path: "server/signals.db"
+  daily_run_hour: 16
+  daily_run_minute: 30
+  timezone: "US/Eastern"
+
+apns:
+  key_path: "path/to/AuthKey.p8"
+  key_id: "YOUR_KEY_ID"
+  team_id: "YOUR_TEAM_ID"
+  bundle_id: "com.yourname.SignalBoard"
+  use_sandbox: true

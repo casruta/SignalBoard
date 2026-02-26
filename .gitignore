@@ -1,0 +1,30 @@
+# Data caches
+data/cache/
+models/saved/
+backtest/results/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Config with secrets
+config.yaml
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# iOS build artifacts
+ios/SignalBoard/build/
+ios/SignalBoard/DerivedData/
+*.xcuserdata
