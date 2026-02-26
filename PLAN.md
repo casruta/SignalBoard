@@ -4,33 +4,89 @@
 
 A **hybrid swing-trading system** for broad equities (S&P 500 / TSX Composite),
 combining machine learning, classic quantitative signals, and macro/fundamental
-overlays. Trades are held for days to weeks. The system begins as a backtesting
-framework and can later connect to a brokerage for paper or live trading.
+overlays. Trades are held for days to weeks.
+
+The system is delivered as a **native iOS app (SwiftUI)** for personal use that
+presents strong buy and sell signals with full explainability — tap any ticker
+to see exactly *why* the model recommends the trade. A Python backend runs the
+ML pipeline daily and serves recommendations via a REST API, with push
+notifications for high-confidence signals.
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    ORCHESTRATOR (main.py)                │
-│  - Scheduling / cron loop                               │
-│  - Coordinates all modules below                        │
-└────┬──────────┬──────────────┬──────────────┬───────────┘
-     │          │              │              │
-     v          v              v              v
-┌─────────┐ ┌──────────┐ ┌──────────┐ ┌────────────┐
-│  DATA   │ │ SIGNALS  │ │  MODEL   │ │  EXECUTION │
-│ PIPELINE│ │ ENGINE   │ │ (ML)     │ │  & RISK    │
-└─────────┘ └──────────┘ └──────────┘ └────────────┘
-     │          │              │              │
-     v          v              v              v
-┌─────────────────────────────────────────────────────────┐
-│                 BACKTESTING ENGINE                       │
-│  - Simulates strategy over historical data              │
-│  - Performance metrics, drawdown, Sharpe, etc.          │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│              iPhone App (SwiftUI)                         │
+│                                                          │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │  Signal List (Home Screen)                         │  │
+│  │  ┌────────┐ ┌────────┐ ┌────────┐                 │  │
+│  │  │  AAPL  │ │  MSFT  │ │  JPM   │  ...            │  │
+│  │  │  BUY   │ │  SELL  │ │  BUY   │                 │  │
+│  │  │  78%   │ │  82%   │ │  71%   │                 │  │
+│  │  └───┬────┘ └────────┘ └────────┘                 │  │
+│  │      │ tap                                         │  │
+│  │      v                                             │  │
+│  │  Detail View                                       │  │
+│  │  ┌──────────────────────────────────────────────┐  │  │
+│  │  │ AAPL — Strong Buy (78% confidence)           │  │  │
+│  │  │                                              │  │  │
+│  │  │ Technical:  RSI oversold, MACD bullish cross │  │  │
+│  │  │ Fundamental: P/E below sector, EPS beat +8%  │  │  │
+│  │  │ Macro:  Risk-on regime, VIX declining        │  │  │
+│  │  │ ML Model: +2.3% predicted 5-day return       │  │  │
+│  │  │                                              │  │  │
+│  │  │ Entry: $204.20  Stop: $198.10  Target: $214  │  │  │
+│  │  └──────────────────────────────────────────────┘  │  │
+│  └────────────────────────────────────────────────────┘  │
+│  + Push notifications for high-confidence signals (APNs) │
+└──────────────────────┬───────────────────────────────────┘
+                       │ HTTPS (REST API)
+                       v
+┌──────────────────────────────────────────────────────────┐
+│            Backend API (FastAPI / Python)                 │
+│            Hosted on VPS / Railway / Fly.io              │
+│                                                          │
+│  GET  /signals          → current buy/sell list (JSON)   │
+│  GET  /signals/{ticker} → full detail + explainability   │
+│  POST /device-token     → register APNs device token     │
+│                                                          │
+│  Cron: daily at 4:30 PM ET (after market close)          │
+│    1. Fetch latest data                                  │
+│    2. Re-score all tickers                               │
+│    3. Store recommendations in DB                        │
+│    4. Push notifications for strong signals              │
+└──────────────────────┬───────────────────────────────────┘
+                       │
+                       v
+┌──────────────────────────────────────────────────────────┐
+│              ML + Quant Engine (Python)                   │
+│                                                          │
+│  Data Pipeline → Signals → ML Model → Strategy/Risk      │
+│       │              │          │            │            │
+│       v              v          v            v            │
+│  ┌─────────┐  ┌──────────┐ ┌────────┐ ┌──────────────┐  │
+│  │ yfinance│  │Technical │ │LightGBM│ │ Explainability│  │
+│  │ FRED API│  │Fundament.│ │XGBoost │ │ Engine        │  │
+│  └─────────┘  │Macro     │ │        │ │ (human-       │  │
+│               └──────────┘ └────────┘ │  readable why) │  │
+│                                       └──────────────┘  │
+│                                                          │
+│  Backtesting Engine (validate before going live)         │
+└──────────────────────────────────────────────────────────┘
 ```
+
+### External APIs Used: 2
+
+| # | API | What It Provides | Cost |
+|---|-----|-----------------|------|
+| 1 | **Yahoo Finance** (`yfinance`) | Daily OHLCV prices, quarterly financials (P/E, EPS, revenue, debt ratios), sector data | Free |
+| 2 | **FRED** (`fredapi`) | Macro indicators: VIX, yield curve, unemployment, CPI, Fed Funds Rate, oil prices (WTI) | Free (API key) |
+
+All technical signals (RSI, MACD, Bollinger Bands, etc.) and ML features are
+computed locally from the downloaded data — no additional APIs needed.
 
 ---
 
@@ -269,25 +325,243 @@ backtest/
 
 ---
 
-## Phase 6 — Execution Layer (`execution/`) [Future]
+## Phase 6 — Explainability Engine (`explainability/`)
+
+**Goal:** For every buy/sell signal, produce a human-readable explanation of
+*what* the system recommends and *why* — this is what the user sees when they
+tap a ticker in the iOS app.
+
+### 6a. Signal Decomposition
+- Break the final score into contributions from each signal category
+- Use LightGBM's built-in **SHAP values** to attribute prediction to features
+- Rank the top 3-5 contributing factors per recommendation
+
+### 6b. Narrative Generator
+- Convert raw signal values into plain-English sentences:
+  - `RSI = 28` → "RSI is oversold at 28 (below 30 threshold)"
+  - `PE_vs_sector = -0.23` → "P/E ratio is 23% below the sector average"
+  - `macro_regime = risk_on` → "Macro environment favors risk-on positioning"
+- Categorize explanations under: Technical, Fundamental, Macro, ML Model
+
+### 6c. Recommendation Output Schema
+Each recommendation produced by the engine follows this structure:
+```json
+{
+  "ticker": "AAPL",
+  "action": "BUY",
+  "confidence": 0.78,
+  "predicted_return_5d": 0.023,
+  "entry_price": 204.20,
+  "stop_loss": 198.10,
+  "take_profit": 214.40,
+  "trailing_stop_trigger": 210.30,
+  "time_stop_days": 15,
+  "position_size_pct": 4.2,
+  "sector": "Technology",
+  "explanation": {
+    "technical": [
+      "RSI oversold at 28 — historically rebounds from this level",
+      "Price touching lower Bollinger Band with contracting bandwidth",
+      "MACD bullish crossover forming on daily chart"
+    ],
+    "fundamental": [
+      "P/E of 24.1 is 23% below Technology sector average of 31.2",
+      "Last quarter EPS beat consensus by 8%",
+      "Quality score: A (high ROE, low debt-to-equity)"
+    ],
+    "macro": [
+      "Yield curve normalizing — favors equity risk",
+      "VIX declining from 22 to 16 — entering low-volatility regime",
+      "WTI crude trending up — risk-on signal"
+    ],
+    "ml_model": {
+      "predicted_return": "+2.3% over 5 days",
+      "confidence_percentile": "Top 8% of all current signals",
+      "top_features": ["RSI_14", "PE_vs_sector", "VIX_regime"]
+    }
+  },
+  "risk_context": {
+    "sector_exposure_after": "Technology: 22% (limit: 25%)",
+    "portfolio_positions_after": "12 of 20 max",
+    "correlation_note": "Low correlation with existing holdings"
+  },
+  "generated_at": "2026-02-26T21:30:00Z"
+}
+```
+
+### 6d. Historical Performance Context
+- Show how similar signals performed historically:
+  "In the last 50 times RSI dropped below 30 for AAPL, the stock gained
+  an average of 3.2% over the following 10 days (68% win rate)"
+- Backtest hit rate for the specific combination of active signals
+
+**Files to create:**
+```
+explainability/
+  __init__.py
+  decomposer.py       # SHAP-based signal attribution
+  narrator.py         # Convert signals to plain-English text
+  historical.py       # Similar-signal historical performance
+  schema.py           # Recommendation dataclass / JSON schema
+```
+
+**Dependencies:** `shap`
+
+---
+
+## Phase 7 — Backend API (`server/`)
+
+**Goal:** A lightweight Python API that runs the ML pipeline on schedule,
+stores recommendations, and serves them to the iOS app.
+
+### 7a. API Endpoints
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/signals` | Current buy/sell list with summary info |
+| GET | `/signals/{ticker}` | Full recommendation detail + explainability |
+| GET | `/signals/history` | Past recommendations + outcomes |
+| GET | `/health` | Server health check |
+| POST | `/device-token` | Register APNs device token for push |
+
+### 7b. Daily Pipeline Scheduler
+- **Cron trigger:** Daily at 4:30 PM ET (after US market close)
+- **Pipeline steps:**
+  1. Fetch latest price + fundamental + macro data
+  2. Compute all signals
+  3. Run ML model predictions
+  4. Apply strategy rules + risk filters
+  5. Generate explainability narratives
+  6. Store recommendations in database
+  7. Send push notifications for strong signals (confidence > 75%)
+
+### 7c. Database
+- **SQLite** (personal use — no need for PostgreSQL)
+- Tables:
+  - `recommendations` — daily signals with full JSON payload
+  - `outcomes` — actual returns after recommendation (track accuracy)
+  - `device_tokens` — APNs tokens for push notifications
+  - `model_metadata` — trained model versions and performance
+
+### 7d. Push Notifications (APNs)
+- Register device token from iOS app on first launch
+- Send push when a new strong signal (confidence > 75%) is generated
+- Notification payload: ticker, action (BUY/SELL), confidence, one-line reason
+- Use `aioapns` or `PyAPNs2` library
+- Requires Apple Developer account + APNs certificate
+
+### 7e. Hosting
+- **Railway** or **Fly.io** (simple deploys, free/cheap tiers)
+- Alternatively: any $5/month VPS (DigitalOcean, Linode)
+- Dockerized for easy deployment
+
+**Files to create:**
+```
+server/
+  __init__.py
+  app.py               # FastAPI application
+  scheduler.py         # APScheduler daily pipeline trigger
+  database.py          # SQLite models + queries
+  push.py              # APNs push notification sender
+  Dockerfile           # Container for deployment
+```
+
+**Dependencies:** `fastapi`, `uvicorn`, `apscheduler`, `aioapns`, `sqlalchemy`
+
+---
+
+## Phase 8 — iOS App (`ios/SignalBoard/`)
+
+**Goal:** A native SwiftUI iPhone app that displays buy/sell recommendations
+with full drill-down explainability and push notification support.
+
+### 8a. App Screens
+
+**Screen 1 — Signal List (Home)**
+- Cards for each active recommendation, sorted by confidence
+- Each card shows: ticker symbol, company name, BUY/SELL badge, confidence %
+- Color-coded: green for buy, red for sell, intensity scales with confidence
+- Pull-to-refresh for latest signals
+- Last-updated timestamp at top
+- Empty state when no signals are active
+
+**Screen 2 — Signal Detail (Tap a ticker)**
+- Header: ticker, action, confidence, predicted return
+- Sections (expandable):
+  - **Technical Analysis** — bullet points from narrator
+  - **Fundamental Analysis** — value/quality/growth breakdown
+  - **Macro Environment** — regime context
+  - **ML Model Insight** — prediction, top features, SHAP summary
+  - **Risk Parameters** — entry, stop, target, position size
+  - **Historical Context** — how similar setups performed
+- Mini price chart (last 30 days) with entry/stop/target levels marked
+
+**Screen 3 — Settings**
+- Backend URL configuration
+- Push notification toggle
+- Confidence threshold filter (e.g., only show signals > 70%)
+
+### 8b. Networking Layer
+- Swift `async/await` with `URLSession`
+- Calls backend `/signals` and `/signals/{ticker}` endpoints
+- JSON decoding into Swift structs matching the recommendation schema
+- Error handling + offline state
+
+### 8c. Push Notifications
+- Request notification permission on first launch
+- Register device token with backend via `/device-token`
+- Handle incoming notifications: deep-link to Signal Detail for the ticker
+
+### 8d. Distribution
+- **Personal use only** — no App Store submission needed
+- Install via Xcode directly to your iPhone, or
+- Use TestFlight (free, up to 25 internal testers)
+- Requires Apple Developer account ($99/year)
+
+**Files to create:**
+```
+ios/
+  SignalBoard/
+    SignalBoardApp.swift        # App entry point
+    Models/
+      Signal.swift              # Data models matching API schema
+    Views/
+      SignalListView.swift      # Home screen — card list
+      SignalCardView.swift      # Individual ticker card
+      SignalDetailView.swift    # Full explainability drill-down
+      PriceChartView.swift      # Mini price chart
+      SettingsView.swift        # Configuration screen
+    Services/
+      APIClient.swift           # Backend REST client
+      NotificationManager.swift # APNs registration + handling
+    Assets.xcassets/            # App icon, colors
+    Info.plist
+  SignalBoard.xcodeproj/
+```
+
+**Requirements:** Xcode 15+, iOS 17+, Apple Developer account
+
+---
+
+## Phase 9 — Execution Layer (`execution/`) [Future]
 
 **Goal:** Connect to a brokerage API for paper and eventually live trading.
 
-### 6a. Broker Abstraction
+### 9a. Broker Abstraction
 - Common interface: `place_order()`, `get_positions()`, `get_account()`
 - Implementations for:
   - **Paper trading** (simulated, in-memory)
   - **Alpaca** (commission-free, good API, paper mode built-in)
   - **Interactive Brokers** (broader asset coverage, professional)
 
-### 6b. Order Management
+### 9b. Order Management
 - Limit orders preferred (avoid market orders in low-liquidity names)
 - Order timeout / cancel-replace logic
 - Fill tracking and reconciliation
 
-### 6c. Monitoring & Alerts
-- Dashboard: current positions, P&L, signals
-- Alerts: Slack/email on trade execution, risk limit breach, errors
+### 9c. App Integration
+- Add "Execute Trade" button to Signal Detail view (Phase 8)
+- Confirmation dialog before placing orders
+- Position tracking view in the app
 
 **Files to create (future):**
 ```
@@ -296,7 +570,6 @@ execution/
   broker_base.py       # Abstract broker interface
   paper_broker.py      # Simulated execution
   alpaca_broker.py     # Alpaca API integration
-  monitor.py           # Position monitoring + alerts
 ```
 
 ---
@@ -306,61 +579,96 @@ execution/
 ```
 AB-Budget-Analysis/
 ├── README.md
-├── PLAN.md                 # This file
-├── requirements.txt
-├── config.yaml             # API keys, parameters, universe definition
-├── main.py                 # Orchestrator / entry point
+├── PLAN.md                     # This file
+├── requirements.txt            # Python dependencies
+├── config.yaml                 # API keys, parameters, universe definition
+├── main.py                     # Orchestrator / entry point
+├── .gitignore
 │
-├── data/
+├── data/                       # Phase 1 — Data Pipeline
 │   ├── __init__.py
-│   ├── price_loader.py
-│   ├── fundamental_loader.py
-│   ├── macro_loader.py
-│   ├── data_manager.py
-│   └── cache/              # (gitignored)
+│   ├── price_loader.py         # yfinance wrapper + Parquet cache
+│   ├── fundamental_loader.py   # Quarterly financials
+│   ├── macro_loader.py         # FRED API wrapper
+│   ├── data_manager.py         # Unified interface
+│   └── cache/                  # (gitignored)
 │
-├── signals/
+├── signals/                    # Phase 2 — Signal Engine
 │   ├── __init__.py
-│   ├── technical.py
-│   ├── fundamental.py
-│   ├── macro.py
-│   └── combiner.py
+│   ├── technical.py            # RSI, MACD, Bollinger, etc.
+│   ├── fundamental.py          # Value, quality, growth scores
+│   ├── macro.py                # Regime detection
+│   └── combiner.py             # Normalize + merge into feature matrix
 │
-├── models/
+├── models/                     # Phase 3 — ML Model
 │   ├── __init__.py
-│   ├── features.py
-│   ├── trainer.py
-│   ├── predict.py
-│   ├── registry.py
-│   └── saved/              # (gitignored)
+│   ├── features.py             # Feature engineering
+│   ├── trainer.py              # Walk-forward training loop
+│   ├── predict.py              # Generate predictions
+│   ├── registry.py             # Save/load/compare models
+│   └── saved/                  # (gitignored)
 │
-├── strategy/
+├── strategy/                   # Phase 4 — Strategy & Risk
 │   ├── __init__.py
-│   ├── portfolio.py
-│   ├── entry_exit.py
-│   └── risk_manager.py
+│   ├── portfolio.py            # Position sizing, allocation
+│   ├── entry_exit.py           # Entry/exit rule engine
+│   └── risk_manager.py         # Enforce limits, circuit breakers
 │
-├── backtest/
+├── backtest/                   # Phase 5 — Backtesting
 │   ├── __init__.py
-│   ├── engine.py
-│   ├── metrics.py
-│   ├── report.py
-│   └── results/            # (gitignored)
+│   ├── engine.py               # Core event-driven backtester
+│   ├── metrics.py              # Sharpe, drawdown, win rate
+│   ├── report.py               # Generate charts + summary
+│   └── results/                # (gitignored)
 │
-├── execution/              # Future phase
+├── explainability/             # Phase 6 — Explainability
+│   ├── __init__.py
+│   ├── decomposer.py           # SHAP-based signal attribution
+│   ├── narrator.py             # Signals → plain-English text
+│   ├── historical.py           # Similar-signal historical perf
+│   └── schema.py               # Recommendation dataclass / JSON
+│
+├── server/                     # Phase 7 — Backend API
+│   ├── __init__.py
+│   ├── app.py                  # FastAPI application
+│   ├── scheduler.py            # Daily pipeline trigger
+│   ├── database.py             # SQLite models + queries
+│   ├── push.py                 # APNs push notifications
+│   └── Dockerfile              # Container for deployment
+│
+├── ios/                        # Phase 8 — iOS App
+│   └── SignalBoard/
+│       ├── SignalBoardApp.swift
+│       ├── Models/
+│       │   └── Signal.swift
+│       ├── Views/
+│       │   ├── SignalListView.swift
+│       │   ├── SignalCardView.swift
+│       │   ├── SignalDetailView.swift
+│       │   ├── PriceChartView.swift
+│       │   └── SettingsView.swift
+│       ├── Services/
+│       │   ├── APIClient.swift
+│       │   └── NotificationManager.swift
+│       ├── Assets.xcassets/
+│       └── Info.plist
+│
+├── execution/                  # Phase 9 — Execution (future)
 │   ├── __init__.py
 │   ├── broker_base.py
 │   ├── paper_broker.py
 │   └── alpaca_broker.py
 │
-├── tests/
+├── tests/                      # Unit + integration tests
 │   ├── test_data.py
 │   ├── test_signals.py
 │   ├── test_models.py
 │   ├── test_strategy.py
-│   └── test_backtest.py
+│   ├── test_backtest.py
+│   ├── test_explainability.py
+│   └── test_server.py
 │
-└── notebooks/              # Exploratory analysis
+└── notebooks/                  # Exploratory analysis
     ├── 01_data_exploration.ipynb
     └── 02_signal_research.ipynb
 ```
@@ -369,38 +677,68 @@ AB-Budget-Analysis/
 
 ## Implementation Order
 
-| Step | Phase                    | Est. Complexity | Depends On |
-|------|--------------------------|-----------------|------------|
-| 1    | Data Pipeline (Phase 1)  | Medium          | —          |
-| 2    | Signal Engine (Phase 2)  | Medium          | Phase 1    |
-| 3    | Backtesting Engine (Phase 5) | High        | Phase 1    |
-| 4    | ML Model (Phase 3)       | High           | Phase 1, 2 |
-| 5    | Strategy & Risk (Phase 4)| Medium          | Phase 2, 3 |
-| 6    | Integration & Tuning     | High           | All above  |
-| 7    | Execution Layer (Phase 6)| Medium          | Phase 4, 5 |
+| Step | Phase                          | Est. Complexity | Depends On     |
+|------|--------------------------------|-----------------|----------------|
+| 1    | Data Pipeline (Phase 1)        | Medium          | —              |
+| 2    | Signal Engine (Phase 2)        | Medium          | Phase 1        |
+| 3    | Backtesting Engine (Phase 5)   | High            | Phase 1        |
+| 4    | ML Model (Phase 3)             | High            | Phase 1, 2     |
+| 5    | Strategy & Risk (Phase 4)      | Medium          | Phase 2, 3     |
+| 6    | Explainability Engine (Phase 6)| Medium          | Phase 2, 3, 4  |
+| 7    | Integration & Backtest Tuning  | High            | Phases 1-6     |
+| 8    | Backend API (Phase 7)          | Medium          | Phases 1-6     |
+| 9    | iOS App (Phase 8)              | Medium-High     | Phase 7        |
+| 10   | Execution Layer (Phase 9)      | Medium          | Phase 7, 8     |
 
-> **Note:** Phases 2 and 5 can be developed in parallel since they share
-> only the data layer dependency.
+> **Notes:**
+> - Phases 2 and 5 can be developed in parallel (share only the data layer).
+> - The iOS app (Phase 8) can begin scaffolding with mock data while the
+>   backend (Phase 7) is being built.
+> - The strategy must pass backtest success criteria (Step 7) before
+>   deploying the backend for live signal generation.
 
 ---
 
 ## Key Dependencies
 
+### Python (Backend + ML Engine)
 ```
-# requirements.txt (initial)
+# requirements.txt
+# --- Data Pipeline ---
 yfinance>=0.2.31
 fredapi>=0.5.1
 pandas>=2.0
 numpy>=1.24
 pyarrow>=14.0
+
+# --- Signals & ML ---
+ta>=0.11.0              # Technical analysis indicators
 lightgbm>=4.0
 scikit-learn>=1.3
-ta>=0.11.0          # Technical analysis indicators
+shap>=0.44              # Model explainability (SHAP values)
+optuna>=3.4             # Optional: hyperparameter tuning
+
+# --- Backtesting & Reporting ---
 matplotlib>=3.7
 seaborn>=0.13
+
+# --- Backend API ---
+fastapi>=0.109
+uvicorn>=0.27
+sqlalchemy>=2.0
+apscheduler>=3.10
+aioapns>=3.0            # Apple Push Notification service
+
+# --- Config ---
 pyyaml>=6.0
-optuna>=3.4         # Optional: hyperparameter tuning
 ```
+
+### iOS App
+- Xcode 15+
+- iOS 17+ deployment target
+- SwiftUI (built-in)
+- Swift Charts (built-in, for price charts)
+- Apple Developer account ($99/year — for APNs + device install)
 
 ---
 
@@ -414,6 +752,9 @@ optuna>=3.4         # Optional: hyperparameter tuning
 | yfinance rate limits / API changes | Data pipeline breaks | Local caching, fallback to Alpha Vantage |
 | Slippage underestimation | Live results worse than backtest | Conservative slippage assumptions (0.05-0.1%), limit orders |
 | Regime change (strategy stops working) | Losses | Macro regime overlay, drawdown-based circuit breaker, regular model retraining |
+| Backend server downtime | No daily signals | Health check endpoint, simple uptime monitoring (e.g., UptimeRobot free tier) |
+| APNs certificate expiry | Push notifications stop | Calendar reminder to renew; log push failures in DB |
+| Stale signals shown in app | User acts on outdated info | Show last-updated timestamp prominently; grey out signals older than 24h |
 
 ---
 
