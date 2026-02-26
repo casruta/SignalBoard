@@ -1,0 +1,60 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Data cache
+data/cache/
+*.parquet
+
+# Trained models
+models/saved/
+*.txt
+!requirements.txt
+
+# Backtest results
+backtest/results/
+
+# Database
+*.db
+*.sqlite3
+
+# Config with secrets
+config.yaml
+
+# Environment variables
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# APNs keys
+*.p8
+*.pem
+
+# Xcode
+ios/SignalBoard.xcodeproj/xcuserdata/
+ios/SignalBoard.xcodeproj/project.xcworkspace/xcuserdata/
