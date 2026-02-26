@@ -1,0 +1,165 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { loadAllReportsSync } from "@/lib/reports";
+import { TICKER_SYMBOLS } from "@/lib/tickers";
+import { SignalBadge } from "@/components/SignalBadge";
+import { ScoreGauge } from "@/components/ScoreGauge";
+import { PriceChart } from "@/components/PriceChart";
+import { SignalGrid } from "@/components/SignalGrid";
+import { FactorTable } from "@/components/FactorTable";
+import { RiskPanel } from "@/components/RiskPanel";
+import { AnalysisSection } from "@/components/AnalysisSection";
+import { CatalystRiskList } from "@/components/CatalystRiskList";
+
+export function generateStaticParams() {
+  return TICKER_SYMBOLS.map((symbol) => ({ symbol }));
+}
+
+export default async function TickerReportPage({
+  params,
+}: {
+  params: Promise<{ symbol: string }>;
+}) {
+  const { symbol } = await params;
+  const upperSymbol = symbol.toUpperCase();
+  const reports = loadAllReportsSync();
+  const report = reports[upperSymbol];
+
+  if (!report) {
+    notFound();
+  }
+
+  const changeColor =
+    report.priceChangePct > 0
+      ? "text-green-400"
+      : report.priceChangePct < 0
+        ? "text-red-400"
+        : "text-[var(--color-text-dim)]";
+
+  return (
+    <div className="space-y-6">
+      {/* Breadcrumb */}
+      <nav className="text-sm text-[var(--color-text-dim)]">
+        <Link href="/" className="hover:text-white transition-colors">
+          Dashboard
+        </Link>
+        <span className="mx-2">/</span>
+        <span className="text-white">{report.symbol}</span>
+      </nav>
+
+      {/* Header */}
+      <div className="signal-card p-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-3 mb-1">
+              <h1 className="text-3xl font-bold">{report.symbol}</h1>
+              <SignalBadge direction={report.overallSignal} size="lg" />
+            </div>
+            <div className="text-[var(--color-text-dim)]">
+              {report.companyName} &middot; {report.sector} &middot;{" "}
+              {report.industry}
+            </div>
+            <div className="text-xs text-[var(--color-text-dim)] mt-1">
+              Market Cap: {report.marketCap} | Last Updated:{" "}
+              {report.lastUpdated}
+            </div>
+          </div>
+          <div className="flex items-center gap-8">
+            <div className="text-right">
+              <div className="text-3xl font-bold font-mono">
+                ${report.lastPrice.toFixed(2)}
+              </div>
+              <div className={`text-sm font-mono ${changeColor}`}>
+                {report.priceChange > 0 ? "+" : ""}
+                {report.priceChange.toFixed(2)} ({report.priceChangePct > 0 ? "+" : ""}
+                {report.priceChangePct.toFixed(2)}%)
+              </div>
+            </div>
+            <ScoreGauge
+              score={report.compositeScore}
+              confidence={report.modelConfidence}
+              label="Composite Score"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Executive Summary */}
+      <AnalysisSection
+        title="Executive Summary"
+        content={report.executiveSummary}
+      />
+
+      {/* Price Chart */}
+      <PriceChart data={report.priceHistory} />
+
+      {/* ML Signals */}
+      <SignalGrid signals={report.signals} />
+
+      {/* Factor Exposures */}
+      <FactorTable factors={report.factorExposures} />
+
+      {/* Risk Metrics */}
+      <RiskPanel metrics={report.riskMetrics} />
+
+      {/* Analysis Sections */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <AnalysisSection
+          title="Technical Analysis"
+          content={report.technicalAnalysis}
+        />
+        <AnalysisSection
+          title="Fundamental Analysis"
+          content={report.fundamentalAnalysis}
+        />
+      </div>
+
+      <AnalysisSection
+        title="Sentiment Analysis (NLP-Derived)"
+        content={report.sentimentAnalysis}
+      />
+
+      {/* Catalysts & Risks */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <CatalystRiskList
+          title="Upcoming Catalysts"
+          items={report.catalysts}
+          type="catalyst"
+        />
+        <CatalystRiskList
+          title="Key Risks"
+          items={report.risks}
+          type="risk"
+        />
+      </div>
+
+      {/* Peer Comparison */}
+      <AnalysisSection
+        title="Peer Comparison"
+        content={report.peerComparison}
+      />
+
+      {/* Model Details */}
+      <AnalysisSection
+        title="ML Model Architecture & Performance"
+        content={report.mlModelDetails}
+      />
+
+      {/* Methodology */}
+      <AnalysisSection
+        title="Model Methodology"
+        content={report.modelMethodology}
+      />
+
+      {/* Disclaimer */}
+      <div className="signal-card p-4 text-xs text-[var(--color-text-dim)] leading-relaxed">
+        <strong>Disclaimer:</strong> This report is generated by quantitative ML
+        models for informational purposes only. It does not constitute
+        investment advice, a recommendation, or an offer to buy or sell any
+        security. Model outputs are probabilistic and subject to significant
+        uncertainty. Past performance does not guarantee future results. All
+        investing involves risk of loss.
+      </div>
+    </div>
+  );
+}
