@@ -10,6 +10,7 @@ from strategy.portfolio import PortfolioState, Position, PortfolioConstructor
 from strategy.entry_exit import EntryExitEngine
 from strategy.risk_manager import RiskManager
 from backtest.metrics import compute_metrics
+from strategy.execution import AdaptiveSlippageModel
 
 
 class BacktestEngine:
@@ -31,6 +32,11 @@ class BacktestEngine:
         self.portfolio_constructor = PortfolioConstructor(config)
         self.entry_exit = EntryExitEngine(config)
         self.risk_manager = RiskManager(config)
+        self.use_adaptive_slippage = config.get("backtest", {}).get(
+            "adaptive_slippage", False
+        )
+        if self.use_adaptive_slippage:
+            self.slippage_model = AdaptiveSlippageModel()
 
     def run(
         self,
@@ -38,6 +44,7 @@ class BacktestEngine:
         feature_matrix: pd.DataFrame,
         prices: dict[str, pd.DataFrame],
         fundamentals: pd.DataFrame,
+        macro_df: pd.DataFrame | None = None,
         initial_capital: float = 100_000.0,
     ) -> dict:
         """Run the full backtest.
@@ -48,12 +55,14 @@ class BacktestEngine:
         feature_matrix : MultiIndex (date, ticker) from SignalCombiner
         prices : {ticker: OHLCV DataFrame}
         fundamentals : DataFrame indexed by ticker
+        macro_df : macro indicators (for adaptive slippage VIX lookup)
         initial_capital : starting cash
 
         Returns
         -------
         dict with keys: equity_curve, trades, metrics, daily_returns
         """
+        self._macro_df = macro_df
         portfolio = PortfolioState(
             cash=initial_capital,
             initial_capital=initial_capital,
@@ -135,7 +144,16 @@ class BacktestEngine:
 
                     price = current_prices[signal.ticker]
                     # Apply slippage (worse price on entry)
-                    entry_price = price * (1 + self.slippage_pct)
+                    if self.use_adaptive_slippage:
+                        vix = self._get_vix(date)
+                        mkt_cap = self._get_market_cap(fundamentals, signal.ticker)
+                        slippage = self.slippage_model.estimate_slippage(
+                            price=price, shares=100, avg_daily_volume=1_000_000.0,
+                            market_cap=mkt_cap, vix_level=vix,
+                        )
+                        entry_price = price * (1 + slippage / 10000)  # bps to decimal
+                    else:
+                        entry_price = price * (1 + self.slippage_pct)
 
                     # Get ATR for position sizing
                     atr = self._get_atr(prices, signal.ticker, date)
@@ -242,3 +260,18 @@ class BacktestEngine:
         if ticker in fundamentals.index and "sector" in fundamentals.columns:
             return str(fundamentals.loc[ticker, "sector"])
         return "Unknown"
+
+    @staticmethod
+    def _get_market_cap(fundamentals: pd.DataFrame, ticker: str) -> float:
+        if ticker in fundamentals.index and "market_cap" in fundamentals.columns:
+            val = fundamentals.loc[ticker, "market_cap"]
+            if pd.notna(val):
+                return float(val)
+        return 100e9  # default to large cap
+
+    def _get_vix(self, date) -> float:
+        if self._macro_df is not None and "vix" in self._macro_df.columns:
+            before = self._macro_df[self._macro_df.index <= date]
+            if len(before) > 0:
+                return float(before["vix"].iloc[-1])
+        return 18.0  # default

@@ -58,6 +58,13 @@ model:
   train_window_years: 2
   validation_window_months: 3
   retrain_frequency_days: 30
+  use_ensemble: false              # Train StackingEnsemble (LightGBM + XGBoost + Ridge)
+  calibrate_probabilities: true    # Fit isotonic calibration on validation set
+  check_regime_shift: true         # Run adversarial validation between folds
+
+backtest:
+  adaptive_slippage: false         # Use AdaptiveSlippageModel instead of fixed 5bps
+  include_network_signals: true    # Add correlation network features to signal matrix
 
 server:
   host: "0.0.0.0"

@@ -35,7 +35,7 @@ def build_correlation_network(
     tickers = corr.columns.tolist()
 
     # Adjacency matrix (edges where |corr| > threshold)
-    adj = (corr.abs() > threshold).astype(int).values
+    adj = (corr.abs() > threshold).astype(int).values.copy()
     np.fill_diagonal(adj, 0)
 
     # Degree centrality: fraction of connections

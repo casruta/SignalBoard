@@ -11,6 +11,7 @@ from signals.statistical import compute_statistical_features
 from signals.calendar_features import compute_calendar_features
 from signals.cross_sectional import compute_cross_sectional_features
 from signals.interactions import compute_interaction_features
+from signals.network_analysis import compute_network_features
 
 
 class SignalCombiner:
@@ -49,6 +50,12 @@ class SignalCombiner:
             calendar_features = compute_calendar_features(calendar_idx)
         else:
             calendar_features = pd.DataFrame()
+
+        # Compute network features once (cross-asset correlations)
+        try:
+            network_features = compute_network_features(prices, window=60)
+        except Exception:
+            network_features = pd.DataFrame()
 
         rows = []
         for ticker, price_df in prices.items():
@@ -98,6 +105,11 @@ class SignalCombiner:
             # Add fundamental features
             for key, val in fund_row.items():
                 combined[f"fund_{key}"] = val
+
+            # Add network features (static per ticker)
+            if len(network_features) > 0 and ticker in network_features.index:
+                for col in network_features.columns:
+                    combined[col] = float(network_features.loc[ticker, col])
 
             combined["ticker"] = ticker
             rows.append(combined)

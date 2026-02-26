@@ -24,6 +24,8 @@ class TrainResult:
     precision_down: float
     f1: float
     feature_importance: dict = field(default_factory=dict)
+    val_probs: np.ndarray | None = None
+    val_y: np.ndarray | None = None
 
 
 def compute_sample_weights(
@@ -38,7 +40,7 @@ def compute_sample_weights(
     dates = X_train.index.get_level_values("date")
     max_date = dates.max()
 
-    days_ago = (max_date - dates).days
+    days_ago = np.array((max_date - dates).days, dtype=float)
     recency_weight = np.exp(-np.log(2) * days_ago / recency_halflife_days)
 
     vol_weight = np.ones(len(X_train))
@@ -184,6 +186,8 @@ class WalkForwardTrainer:
                 precision_down=prec_down,
                 f1=f1,
                 feature_importance=importance,
+                val_probs=y_pred_prob,
+                val_y=y_val.values,
             )
             results.append(result)
 

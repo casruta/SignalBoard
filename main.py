@@ -14,6 +14,8 @@ import asyncio
 import logging
 import sys
 
+import pandas as pd
+
 from config_loader import load_config
 
 logging.basicConfig(
@@ -93,6 +95,35 @@ def cmd_train(config: dict):
                 r.fold, r.accuracy, r.f1, r.precision_up,
                 r.val_start, r.val_end,
             )
+
+        # 5. Probability calibration on last fold's validation predictions
+        if config.get("model", {}).get("calibrate_probabilities", True):
+            try:
+                last_result = results[-1]
+                if last_result.val_probs is not None and last_result.val_y is not None:
+                    calibrator = ProbabilityCalibrator()
+                    calibrator.fit(last_result.val_y, last_result.val_probs)
+                    logger.info("Probability calibrator fitted on last fold validation data")
+            except Exception as e:
+                logger.warning("Calibration skipped: %s", e)
+
+        # 6. Adversarial validation for regime shift detection
+        if config.get("model", {}).get("check_regime_shift", True):
+            try:
+                dates = X_selected.index.get_level_values("date").unique().sort_values()
+                midpoint = len(dates) // 2
+                early_dates = dates[:midpoint]
+                recent_dates = dates[midpoint:]
+                X_early = X_selected[X_selected.index.get_level_values("date").isin(early_dates)]
+                X_recent = X_selected[X_selected.index.get_level_values("date").isin(recent_dates)]
+                av_result = adversarial_validation(X_early, X_recent)
+                logger.info("Adversarial validation AUC: %.3f", av_result["auc"])
+                if av_result["regime_shift_detected"]:
+                    logger.warning("Regime shift detected! Distribution has changed significantly.")
+                    for feat, imp in list(av_result["top_shifting_features"].items())[:5]:
+                        logger.warning("  Shifting feature: %-30s importance=%.4f", feat, imp)
+            except Exception as e:
+                logger.warning("Regime detection skipped: %s", e)
     else:
         logger.warning("No training folds completed. Need more data.")
 
@@ -113,7 +144,7 @@ def cmd_backtest(config: dict):
 
     # Run backtest
     engine = BacktestEngine(config)
-    results = engine.run(model, fm, prices, fundamentals)
+    results = engine.run(model, fm, prices, fundamentals, macro_df=macro)
 
     # Report
     metrics = results["metrics"]
@@ -129,9 +160,11 @@ def cmd_backtest(config: dict):
 
 
 def cmd_predict(config: dict):
-    """Generate predictions for the latest available date."""
+    """Generate predictions for the latest available date with uncertainty quantification."""
+    import numpy as np
     from models.registry import ModelRegistry
     from models.predict import predict_latest
+    from models.uncertainty import ConformalPredictor, UncertaintyDecomposer
 
     logger.info("=== Generating Predictions ===")
     dm, prices, fundamentals, macro, fm = _build_features(config)
@@ -142,12 +175,46 @@ def cmd_predict(config: dict):
     predictions = predict_latest(model, fm)
     min_conf = config["strategy"]["min_confidence_threshold"]
 
+    # Uncertainty quantification on latest predictions
+    uncertainty_factors = {}
+    try:
+        latest_date = fm.index.get_level_values("date").max()
+        target_cols = ["target_return", "target_class"]
+        feature_cols = [
+            c for c in fm.columns
+            if c not in target_cols and fm[c].dtype in [np.float64, np.int64, float, int]
+        ]
+        latest = fm.loc[latest_date]
+        if not isinstance(latest, pd.Series):
+            X_latest = latest[feature_cols].fillna(latest[feature_cols].median())
+            raw_probs = model.predict(X_latest)
+
+            # Use earlier data as calibration set for conformal predictor
+            dates = fm.index.get_level_values("date").unique().sort_values()
+            cal_dates = dates[-60:-1] if len(dates) > 60 else dates[:-1]
+            cal_mask = fm.index.get_level_values("date").isin(cal_dates)
+            cal_data = fm[cal_mask]
+            X_cal = cal_data[feature_cols].fillna(cal_data[feature_cols].median())
+            if "target_class" in cal_data.columns:
+                y_cal = cal_data["target_class"].map({-1: 0, 0: 1, 1: 2}).values
+                cal_probs = model.predict(X_cal)
+
+                conformal = ConformalPredictor(confidence=0.90)
+                conformal.fit(y_cal, cal_probs)
+                uf = conformal.uncertainty_factor(raw_probs)
+                tickers = X_latest.index if not isinstance(X_latest.index, pd.MultiIndex) else X_latest.index.get_level_values("ticker")
+                for i, ticker in enumerate(tickers):
+                    uncertainty_factors[ticker] = float(uf[i])
+    except Exception as e:
+        logger.debug("Uncertainty quantification skipped: %s", e)
+
     logger.info("=== Signals (confidence >= %.0f%%) ===", min_conf * 100)
     for p in predictions:
         if p.action != "HOLD" and p.confidence >= min_conf:
+            uf = uncertainty_factors.get(p.ticker, 1.0)
             logger.info(
-                "  %s  %-5s  %s  confidence=%.0f%%  probs=[BUY:%.0f%% HOLD:%.0f%% SELL:%.0f%%]",
-                p.date, p.ticker, p.action, p.confidence * 100,
+                "  %s  %-5s  %s  confidence=%.0f%%  uncertainty=%.2f  probs=[BUY:%.0f%% HOLD:%.0f%% SELL:%.0f%%]",
+                p.date, p.ticker, p.action, p.confidence * 100, uf,
                 p.probabilities["BUY"] * 100,
                 p.probabilities["HOLD"] * 100,
                 p.probabilities["SELL"] * 100,
