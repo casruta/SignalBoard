@@ -1,5 +1,7 @@
 """Unified data interface that coordinates all loaders."""
 
+import logging
+
 import pandas as pd
 
 from config_loader import get_config
@@ -9,6 +11,14 @@ from data.fundamental_loader import (
     fetch_fundamentals_bulk,
 )
 from data.macro_loader import fetch_all_macro, fetch_macro_series
+from data.financial_statements import FinancialStatementLoader
+from data.alternative_data import (
+    fetch_insider_transactions,
+    fetch_institutional_holders,
+    fetch_short_interest_proxy,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class DataManager:
@@ -19,6 +29,8 @@ class DataManager:
         self._tickers = self.config["universe"]["tickers"]
         self._lookback = self.config["universe"]["lookback_years"]
         self._fred_key = self.config["fred"]["api_key"]
+        self._fmp_key = self.config.get("fmp", {}).get("api_key")
+        self._stmt_loader = FinancialStatementLoader(fmp_api_key=self._fmp_key)
 
     # ── Prices ──────────────────────────────────────────────────────
 
@@ -57,6 +69,43 @@ class DataManager:
         return fetch_macro_series(
             name, api_key=self._fred_key, start=start, lookback_years=self._lookback
         )
+
+    # ── Financial Statements (Deep Fundamentals) ────────────────────
+
+    def get_statements(self, ticker: str) -> dict:
+        """Return full financial statements for a single ticker."""
+        return self._stmt_loader.fetch_all_statements(ticker)
+
+    def get_all_statements(self) -> dict[str, dict]:
+        """Return full financial statements for all universe tickers."""
+        return self._stmt_loader.fetch_all_statements_bulk(self._tickers)
+
+    # ── Alternative Data ────────────────────────────────────────────
+
+    def get_insider_transactions(self, ticker: str) -> pd.DataFrame:
+        return fetch_insider_transactions(ticker)
+
+    def get_institutional_holders(self, ticker: str) -> pd.DataFrame:
+        return fetch_institutional_holders(ticker)
+
+    def get_all_alternative_data(self) -> dict[str, dict]:
+        """Fetch insider, institutional, and short interest data for all tickers."""
+        result = {}
+        for t in self._tickers:
+            try:
+                result[t] = {
+                    "insider_df": fetch_insider_transactions(t),
+                    "holders_df": fetch_institutional_holders(t),
+                    "short_df": fetch_short_interest_proxy(t),
+                }
+            except Exception as e:
+                logger.debug("Alt data fetch failed for %s: %s", t, e)
+                result[t] = {
+                    "insider_df": pd.DataFrame(),
+                    "holders_df": pd.DataFrame(),
+                    "short_df": pd.DataFrame(),
+                }
+        return result
 
     # ── Universe ────────────────────────────────────────────────────
 

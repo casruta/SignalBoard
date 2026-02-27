@@ -41,6 +41,29 @@ class OutcomeRow(Base):
     measured_at = Column(DateTime, default=datetime.utcnow)
 
 
+class ScreenedStockRow(Base):
+    __tablename__ = "screened_stocks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ticker = Column(String(10), nullable=False, index=True)
+    short_name = Column(String(100))
+    sector = Column(String(50))
+    industry = Column(String(100))
+    composite_score = Column(Float)
+    rank = Column(Integer)
+    # Component scores (0-1 each)
+    piotroski_score = Column(Float)
+    roic_spread_score = Column(Float)
+    cash_flow_score = Column(Float)
+    balance_sheet_score = Column(Float)
+    dcf_score = Column(Float)
+    blindspot_score = Column(Float)
+    margin_score = Column(Float)
+    # Key metrics for display
+    payload = Column(Text)  # Full analysis JSON (DCF, deep fundamentals, etc.)
+    generated_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 class DeviceTokenRow(Base):
     __tablename__ = "device_tokens"
 
@@ -138,6 +161,94 @@ class Database:
         with self._session() as session:
             session.query(RecommendationRow).delete()
             session.commit()
+
+    # ── Screened Stocks ────────────────────────────────────────────
+
+    def save_screened_stocks(self, stocks: list[dict]) -> None:
+        """Save a batch of screened stocks (replaces previous batch)."""
+        with self._session() as session:
+            # Clear previous screened stocks
+            session.query(ScreenedStockRow).delete()
+            for s in stocks:
+                row = ScreenedStockRow(
+                    ticker=s["ticker"],
+                    short_name=s.get("short_name", ""),
+                    sector=s.get("sector", ""),
+                    industry=s.get("industry", ""),
+                    composite_score=s.get("composite_score"),
+                    rank=s.get("rank"),
+                    piotroski_score=s.get("piotroski_score"),
+                    roic_spread_score=s.get("roic_spread_score"),
+                    cash_flow_score=s.get("cash_flow_score"),
+                    balance_sheet_score=s.get("balance_sheet_score"),
+                    dcf_score=s.get("dcf_score"),
+                    blindspot_score=s.get("blindspot_score"),
+                    margin_score=s.get("margin_score"),
+                    payload=json.dumps(s.get("analysis", {})),
+                    generated_at=datetime.utcnow(),
+                )
+                session.add(row)
+            session.commit()
+
+    def get_screened_stocks(self, limit: int = 20) -> list[dict]:
+        """Get the current screened stocks, ranked by composite score."""
+        with self._session() as session:
+            rows = (
+                session.query(ScreenedStockRow)
+                .order_by(ScreenedStockRow.composite_score.desc())
+                .limit(limit)
+                .all()
+            )
+            return [
+                {
+                    "ticker": r.ticker,
+                    "short_name": r.short_name,
+                    "sector": r.sector,
+                    "industry": r.industry,
+                    "composite_score": r.composite_score,
+                    "rank": r.rank,
+                    "piotroski_score": r.piotroski_score,
+                    "roic_spread_score": r.roic_spread_score,
+                    "cash_flow_score": r.cash_flow_score,
+                    "balance_sheet_score": r.balance_sheet_score,
+                    "dcf_score": r.dcf_score,
+                    "blindspot_score": r.blindspot_score,
+                    "margin_score": r.margin_score,
+                    "generated_at": r.generated_at.isoformat() if r.generated_at else None,
+                }
+                for r in rows
+            ]
+
+    def get_screened_stock_detail(self, ticker: str) -> dict | None:
+        """Get full screened stock analysis for a ticker."""
+        with self._session() as session:
+            row = (
+                session.query(ScreenedStockRow)
+                .filter(ScreenedStockRow.ticker == ticker.upper())
+                .order_by(ScreenedStockRow.generated_at.desc())
+                .first()
+            )
+            if row is None:
+                return None
+            result = {
+                "ticker": row.ticker,
+                "short_name": row.short_name,
+                "sector": row.sector,
+                "industry": row.industry,
+                "composite_score": row.composite_score,
+                "rank": row.rank,
+                "piotroski_score": row.piotroski_score,
+                "roic_spread_score": row.roic_spread_score,
+                "cash_flow_score": row.cash_flow_score,
+                "balance_sheet_score": row.balance_sheet_score,
+                "dcf_score": row.dcf_score,
+                "blindspot_score": row.blindspot_score,
+                "margin_score": row.margin_score,
+                "generated_at": row.generated_at.isoformat() if row.generated_at else None,
+            }
+            if row.payload:
+                result["analysis"] = json.loads(row.payload)
+            return result
 
     # ── Device Tokens ────────────────────────────────────────────
 

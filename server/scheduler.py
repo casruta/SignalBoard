@@ -10,6 +10,9 @@ import pandas as pd
 from config_loader import get_config
 from data.data_manager import DataManager
 from signals.combiner import SignalCombiner
+from signals.dynamic_screener import DynamicScreener
+from signals.dcf_valuation import compute_dcf_valuation
+from signals.fundamental_deep import compute_deep_fundamentals, compute_institutional_blindspot
 from models.features import add_target, prepare_train_data
 from models.predict import predict_latest
 from models.registry import ModelRegistry
@@ -162,6 +165,15 @@ async def run_daily_pipeline(config: dict | None = None) -> list[dict]:
         )
         recommendations.append(rec.to_dict())
 
+    # ── 4b. Run dynamic screener ─────────────────────────────────
+    logger.info("Step 4b: Running dynamic screener...")
+    screened_results = _run_screener(config, dm, prices, fundamentals, macro)
+    if screened_results:
+        logger.info("Screener found %d quality stocks", len(screened_results))
+        db.save_screened_stocks(screened_results)
+    else:
+        logger.warning("Screener returned no results")
+
     # ── 5. Store in database ─────────────────────────────────────
     logger.info("Step 5: Storing %d recommendations...", len(recommendations))
     db.save_recommendations(recommendations)
@@ -173,6 +185,234 @@ async def run_daily_pipeline(config: dict | None = None) -> list[dict]:
 
     logger.info("Pipeline complete. %d recommendations generated.", len(recommendations))
     return recommendations
+
+
+def _run_screener(
+    config: dict,
+    dm: DataManager,
+    prices: dict[str, pd.DataFrame],
+    fundamentals: pd.DataFrame,
+    macro: pd.DataFrame,
+) -> list[dict]:
+    """Run the dynamic screener and build per-stock analysis payloads."""
+    try:
+        statements = dm.get_all_statements()
+        alt_data = dm.get_all_alternative_data()
+    except Exception as e:
+        logger.warning("Could not fetch statements/alt data for screener: %s", e)
+        return []
+
+    # Build info_map from fundamentals
+    info_map = {}
+    for ticker in fundamentals.index:
+        row = fundamentals.loc[ticker]
+        info_map[ticker] = {
+            "marketCap": row.get("market_cap"),
+            "sector": row.get("sector", "Unknown"),
+            "industry": row.get("industry", "Unknown"),
+            "shortName": row.get("short_name", ticker),
+            "trailingPE": row.get("pe_ratio"),
+            "priceToBook": row.get("pb_ratio"),
+            "returnOnEquity": row.get("roe"),
+            "debtToEquity": row.get("debt_to_equity"),
+            "dividendYield": row.get("dividend_yield"),
+            "trailingEps": row.get("eps"),
+            "forwardEps": row.get("forward_eps"),
+            "revenueGrowth": row.get("revenue_growth"),
+        }
+
+    # Get risk-free rate from macro data
+    risk_free_rate = 0.04
+    if macro is not None and not macro.empty and "treasury_10y" in macro.columns:
+        val = macro["treasury_10y"].dropna()
+        if not val.empty:
+            risk_free_rate = float(val.iloc[-1]) / 100.0
+
+    # Compute deep fundamentals and DCF per ticker
+    deep_fund_map = {}
+    dcf_map = {}
+    for ticker, stmts in statements.items():
+        try:
+            deep = compute_deep_fundamentals(stmts, info_map.get(ticker, {}))
+            deep_fund_map[ticker] = deep
+        except Exception:
+            pass
+        try:
+            dcf = compute_dcf_valuation(stmts, info_map.get(ticker, {}), risk_free_rate)
+            dcf_map[ticker] = dcf
+        except Exception:
+            pass
+
+    # Compute blindspot signals
+    for ticker in list(deep_fund_map):
+        try:
+            alt = alt_data.get(ticker, {})
+            blindspot = compute_institutional_blindspot(
+                info_map.get(ticker, {}), alt.get("holders"), alt.get("insiders")
+            )
+            deep_fund_map[ticker].update(blindspot)
+        except Exception:
+            pass
+
+    # Run screener
+    screener_cfg = config.get("screening", {})
+    top_n = screener_cfg.get("top_n", 20)
+    screener = DynamicScreener(top_n=top_n)
+
+    macro_regime = "neutral"
+    scored_df = screener.compute_composite_scores(
+        deep_fund_map, dcf_map, info_map, macro_regime
+    )
+    if scored_df.empty:
+        return []
+
+    safe = scored_df[scored_df["passes_safety"]].copy()
+    if safe.empty:
+        safe = scored_df.head(top_n)  # Fallback: show top even if safety filters fail
+
+    safe = safe.sort_values("composite_score", ascending=False).head(top_n)
+
+    # Build result list with analysis payloads
+    results = []
+    for _, row in safe.iterrows():
+        ticker = row["ticker"]
+        info = info_map.get(ticker, {})
+        deep = deep_fund_map.get(ticker, {})
+        dcf = dcf_map.get(ticker, {})
+
+        analysis = _build_analysis_payload(ticker, info, deep, dcf)
+
+        results.append({
+            "ticker": ticker,
+            "short_name": info.get("shortName", ticker),
+            "sector": info.get("sector", ""),
+            "industry": info.get("industry", ""),
+            "composite_score": float(row["composite_score"]),
+            "rank": int(row["rank"]),
+            "piotroski_score": float(row.get("piotroski_score", 0)),
+            "roic_spread_score": float(row.get("roic_spread_score", 0)),
+            "cash_flow_score": float(row.get("cash_flow_score", 0)),
+            "balance_sheet_score": float(row.get("balance_sheet_score", 0)),
+            "dcf_score": float(row.get("dcf_score", 0)),
+            "blindspot_score": float(row.get("blindspot_score", 0)),
+            "margin_score": float(row.get("margin_score", 0)),
+            "analysis": analysis,
+        })
+
+    return results
+
+
+def _build_analysis_payload(
+    ticker: str, info: dict, deep: dict, dcf: dict
+) -> dict:
+    """Build the detailed analysis JSON for a screened stock."""
+    payload = {"ticker": ticker}
+
+    # Selection reasons (human-readable)
+    reasons = []
+
+    # Piotroski
+    f_score = deep.get("piotroski_f_score")
+    if f_score is not None:
+        payload["piotroski_f_score"] = f_score
+        if f_score >= 7:
+            reasons.append(f"Strong Piotroski F-Score of {f_score}/9 — indicates robust financial health across profitability, leverage, and efficiency")
+        elif f_score >= 5:
+            reasons.append(f"Moderate Piotroski F-Score of {f_score}/9 — solid but not exceptional financial fundamentals")
+
+    # DCF valuation
+    mos = dcf.get("margin_of_safety")
+    upside = dcf.get("dcf_upside_pct")
+    if mos is not None and upside is not None:
+        payload["dcf_margin_of_safety"] = mos
+        payload["dcf_upside_pct"] = upside
+        payload["intrinsic_value_per_share"] = dcf.get("intrinsic_value_per_share")
+        payload["wacc"] = dcf.get("wacc")
+        if mos > 0.2:
+            reasons.append(f"DCF analysis suggests {upside:+.0%} upside with {mos:.0%} margin of safety — trading well below estimated intrinsic value")
+        elif mos > 0:
+            reasons.append(f"Modestly undervalued by DCF: {upside:+.0%} upside potential")
+
+    # ROIC vs WACC
+    roic_spread = dcf.get("roic_vs_wacc_spread")
+    if roic_spread is not None:
+        payload["roic_vs_wacc_spread"] = roic_spread
+        if roic_spread > 0.05:
+            reasons.append(f"Creating significant shareholder value: ROIC exceeds cost of capital by {roic_spread:.1%}")
+        elif roic_spread > 0:
+            reasons.append(f"Positive economic value creation: ROIC beats WACC by {roic_spread:.1%}")
+
+    # Cash flow quality
+    accruals = deep.get("accruals_ratio")
+    fcf_ni = deep.get("fcf_to_net_income")
+    if accruals is not None:
+        payload["accruals_ratio"] = accruals
+        if accruals < -0.05:
+            reasons.append("Conservative accounting: cash flows significantly exceed reported earnings (negative accruals ratio)")
+    if fcf_ni is not None:
+        payload["fcf_to_net_income"] = fcf_ni
+        if fcf_ni > 1.0:
+            reasons.append(f"High-quality earnings: FCF is {fcf_ni:.1f}x net income — cash generation exceeds accounting profits")
+
+    # Balance sheet
+    altman = deep.get("altman_z_score")
+    if altman is not None:
+        payload["altman_z_score"] = altman
+        if altman > 3.0:
+            reasons.append(f"Fortress balance sheet: Altman Z-Score of {altman:.1f} (well above the 2.99 safe zone)")
+
+    int_cov = deep.get("interest_coverage")
+    if int_cov is not None:
+        payload["interest_coverage"] = int_cov
+
+    # Margin trends
+    gm_trend = deep.get("gross_margin_4q_trend")
+    om_trend = deep.get("operating_margin_4q_trend")
+    if gm_trend is not None and gm_trend > 0:
+        payload["gross_margin_trend"] = gm_trend
+        reasons.append("Expanding gross margins over recent quarters — improving pricing power or cost efficiency")
+    if om_trend is not None and om_trend > 0:
+        payload["operating_margin_trend"] = om_trend
+        reasons.append("Operating margins trending upward — demonstrates growing operational leverage")
+
+    # Institutional blindspot
+    analyst_count = deep.get("analyst_count")
+    inst_ownership = deep.get("inst_ownership_pct")
+    if analyst_count is not None:
+        payload["analyst_count"] = analyst_count
+        if analyst_count < 5:
+            reasons.append(f"Under-researched: only {analyst_count} analysts cover this stock — more room for pricing inefficiency")
+    if inst_ownership is not None:
+        payload["inst_ownership_pct"] = inst_ownership
+        if inst_ownership < 0.4:
+            reasons.append(f"Low institutional ownership ({inst_ownership:.0%}) — potential for institutional discovery as fundamentals improve")
+
+    insider_buy = deep.get("insider_cluster_buy")
+    if insider_buy:
+        payload["insider_cluster_buy"] = True
+        reasons.append("Recent cluster of insider buying — management is putting their own money in")
+
+    # FCF yield
+    fcf_yield = dcf.get("fcf_yield")
+    if fcf_yield is not None:
+        payload["fcf_yield"] = fcf_yield
+        if fcf_yield > 0.06:
+            reasons.append(f"Attractive {fcf_yield:.1%} free cash flow yield — strong cash generation relative to market price")
+
+    # EV/FCF
+    ev_fcf = dcf.get("ev_to_fcf")
+    if ev_fcf is not None and ev_fcf > 0:
+        payload["ev_to_fcf"] = ev_fcf
+
+    payload["reasons"] = reasons
+    payload["market_cap"] = info.get("marketCap")
+    payload["pe_ratio"] = info.get("trailingPE")
+    payload["pb_ratio"] = info.get("priceToBook")
+    payload["roe"] = info.get("returnOnEquity")
+    payload["debt_to_equity"] = info.get("debtToEquity")
+    payload["dividend_yield"] = info.get("dividendYield")
+
+    return payload
 
 
 def _get_latest_atr(prices: dict[str, pd.DataFrame], ticker: str) -> float:

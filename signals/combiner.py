@@ -1,5 +1,7 @@
 """Combine technical, fundamental, macro, and advanced signals into a unified feature matrix."""
 
+import logging
+
 import numpy as np
 import pandas as pd
 
@@ -12,6 +14,14 @@ from signals.calendar_features import compute_calendar_features
 from signals.cross_sectional import compute_cross_sectional_features
 from signals.interactions import compute_interaction_features
 from signals.network_analysis import compute_network_features
+from signals.fundamental_deep import (
+    compute_deep_fundamentals,
+    compute_industry_relative_metrics,
+    compute_institutional_blindspot,
+)
+from signals.dcf_valuation import compute_dcf_valuation
+
+logger = logging.getLogger(__name__)
 
 
 class SignalCombiner:
@@ -22,6 +32,9 @@ class SignalCombiner:
         prices: dict[str, pd.DataFrame],
         fundamentals: pd.DataFrame,
         macro_df: pd.DataFrame,
+        statements: dict[str, dict] | None = None,
+        alt_data: dict[str, dict] | None = None,
+        risk_free_rate: float = 0.04,
     ) -> pd.DataFrame:
         """Build the combined feature matrix.
 
@@ -30,6 +43,9 @@ class SignalCombiner:
         prices : {ticker: OHLCV DataFrame}
         fundamentals : DataFrame indexed by ticker (from fundamental_loader)
         macro_df : DataFrame from macro_loader.fetch_all_macro()
+        statements : {ticker: dict of financial statements} (optional, for deep fundamentals)
+        alt_data : {ticker: {insider_df, holders_df, short_df}} (optional)
+        risk_free_rate : 10Y Treasury rate for DCF calculations
 
         Returns
         -------
@@ -56,6 +72,59 @@ class SignalCombiner:
             network_features = compute_network_features(prices, window=60)
         except Exception:
             network_features = pd.DataFrame()
+
+        # ── Deep Fundamentals: DCF + quarterly trends + institutional blindspot ──
+        deep_fund_map: dict[str, dict] = {}
+        dcf_map: dict[str, dict] = {}
+        blindspot_map: dict[str, dict] = {}
+
+        if statements:
+            logger.info("Computing deep fundamentals for %d tickers...", len(statements))
+            for ticker, stmts in statements.items():
+                info = stmts.get("info", {})
+                try:
+                    deep_fund_map[ticker] = compute_deep_fundamentals(stmts, info)
+                except Exception as e:
+                    logger.debug("Deep fundamentals failed for %s: %s", ticker, e)
+
+                try:
+                    dcf_map[ticker] = compute_dcf_valuation(
+                        stmts, info, risk_free_rate=risk_free_rate
+                    )
+                except Exception as e:
+                    logger.debug("DCF failed for %s: %s", ticker, e)
+
+            # Industry-relative metrics (need all tickers computed first)
+            industry_map = {}
+            if not fundamentals.empty and "industry" in fundamentals.columns:
+                industry_map = fundamentals["industry"].to_dict()
+            elif not fundamentals.empty and "sector" in fundamentals.columns:
+                industry_map = fundamentals["sector"].to_dict()
+
+            if deep_fund_map and industry_map:
+                for ticker in deep_fund_map:
+                    try:
+                        industry_rel = compute_industry_relative_metrics(
+                            ticker, deep_fund_map[ticker], deep_fund_map, industry_map,
+                        )
+                        deep_fund_map[ticker].update(industry_rel)
+                    except Exception as e:
+                        logger.debug("Industry-relative failed for %s: %s", ticker, e)
+
+        # Institutional blindspot signals
+        if alt_data:
+            for ticker, adata in alt_data.items():
+                info = {}
+                if statements and ticker in statements:
+                    info = statements[ticker].get("info", {})
+                try:
+                    blindspot_map[ticker] = compute_institutional_blindspot(
+                        info,
+                        adata.get("holders_df", pd.DataFrame()),
+                        adata.get("insider_df", pd.DataFrame()),
+                    )
+                except Exception as e:
+                    logger.debug("Blindspot signals failed for %s: %s", ticker, e)
 
         rows = []
         for ticker, price_df in prices.items():
@@ -102,9 +171,24 @@ class SignalCombiner:
             for col in cal_aligned.columns:
                 combined[f"cal_{col}"] = cal_aligned[col]
 
-            # Add fundamental features
+            # Add fundamental features (original simple)
             for key, val in fund_row.items():
                 combined[f"fund_{key}"] = val
+
+            # Add deep fundamental features (quarterly trends, balance sheet, etc.)
+            if ticker in deep_fund_map:
+                for key, val in deep_fund_map[ticker].items():
+                    combined[f"fund_{key}"] = val
+
+            # Add DCF valuation features
+            if ticker in dcf_map:
+                for key, val in dcf_map[ticker].items():
+                    combined[f"fund_dcf_{key}"] = val
+
+            # Add institutional blindspot features
+            if ticker in blindspot_map:
+                for key, val in blindspot_map[ticker].items():
+                    combined[f"fund_{key}"] = val
 
             # Add network features (static per ticker)
             if len(network_features) > 0 and ticker in network_features.index:
