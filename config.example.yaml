@@ -4,6 +4,9 @@
 fred:
   api_key: "YOUR_FRED_API_KEY"  # Get one free at https://fred.stlouisfed.org/docs/api/api_key.html
 
+fmp:
+  api_key: ""  # Optional. Financial Modeling Prep fallback. Get free at https://site.financialmodelingprep.com/
+
 universe:
   # Top S&P 500 stocks by market cap — expand as needed
   tickers:
@@ -39,6 +42,12 @@ universe:
     - DHR
   lookback_years: 10
 
+screening:
+  enabled: true
+  top_n: 50                      # Number of stocks to keep after dynamic screening
+  min_market_cap: 300000000      # $300M minimum
+  min_altman_z: 1.81             # Not in distress zone
+
 strategy:
   max_positions: 20
   max_position_size_pct: 10.0
@@ -54,13 +63,27 @@ strategy:
   push_notification_threshold: 0.75
 
 model:
-  target_horizon_days: 5
+  target_horizon_days: 10
   train_window_years: 2
   validation_window_months: 3
   retrain_frequency_days: 30
   use_ensemble: false              # Train StackingEnsemble (LightGBM + XGBoost + Ridge)
   calibrate_probabilities: true    # Fit isotonic calibration on validation set
   check_regime_shift: true         # Run adversarial validation between folds
+  use_focal_loss: true             # Focal loss for class imbalance (focuses on BUY/SELL)
+  focal_gamma: 2.0                 # Focal loss gamma (higher = more focus on hard examples)
+  multi_horizon: false             # Train models at 5/10/20-day horizons with consensus
+  horizons: [5, 10, 20]           # Prediction horizons for multi-horizon consensus
+  horizon_weights: [0.3, 0.4, 0.3]
+  regime_conditional: false        # Train per-regime models (bull/bear/sideways)
+  n_regimes: 3
+  regime_blend_weight: 0.7         # Weight for regime-specific vs fallback model
+
+dcf:
+  terminal_growth: 0.02           # 2% terminal growth rate (conservative)
+  equity_risk_premium: 0.06       # 6% ERP (conservative)
+  projection_years: 5
+  small_cap_premium: 0.015        # +1.5% WACC for market cap < $1B
 
 backtest:
   adaptive_slippage: false         # Use AdaptiveSlippageModel instead of fixed 5bps

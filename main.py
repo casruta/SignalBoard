@@ -7,6 +7,7 @@ Usage:
     python main.py serve       Start the API server
     python main.py pipeline    Run the full daily pipeline once
     python main.py analyze     Run IC analysis on all signals
+    python main.py screen      Run dynamic screening to find top stocks
 """
 
 import argparse
@@ -14,6 +15,7 @@ import asyncio
 import logging
 import sys
 
+import numpy as np
 import pandas as pd
 
 from config_loader import load_config
@@ -38,11 +40,48 @@ def _build_features(config: dict):
 
     logger.info("Loaded prices for %d tickers", len(prices))
 
+    # Load deep fundamental data (financial statements + alt data)
+    statements = None
+    alt_data = None
+    risk_free_rate = 0.04  # default
+
+    try:
+        statements = dm.get_all_statements()
+        logger.info("Loaded financial statements for %d tickers", len(statements))
+    except Exception as e:
+        logger.warning("Financial statement loading failed (continuing without): %s", e)
+
+    try:
+        alt_data = dm.get_all_alternative_data()
+        logger.info("Loaded alternative data for %d tickers", len(alt_data))
+    except Exception as e:
+        logger.warning("Alt data loading failed (continuing without): %s", e)
+
+    # Get risk-free rate from macro data (10Y Treasury)
+    try:
+        if "treasury_10y" in macro.columns:
+            latest_rate = macro["treasury_10y"].dropna().iloc[-1]
+            if 0 < latest_rate < 0.20:
+                risk_free_rate = latest_rate
+            logger.info("Risk-free rate: %.2f%%", risk_free_rate * 100)
+    except Exception:
+        pass
+
     combiner = SignalCombiner()
-    fm = combiner.build_feature_matrix(prices, fundamentals, macro)
+    fm = combiner.build_feature_matrix(
+        prices, fundamentals, macro,
+        statements=statements,
+        alt_data=alt_data,
+        risk_free_rate=risk_free_rate,
+    )
     fm = add_target(fm, prices, horizon_days=config["model"]["target_horizon_days"])
 
-    key_signals = ["rsi_14", "macd_histogram", "momentum_5", "zscore_20"]
+    # Key signals for lag/rolling features — now includes deep fundamentals
+    key_signals = [
+        "rsi_14", "macd_histogram", "momentum_5", "zscore_20",
+        "fund_dcf_margin_of_safety", "fund_piotroski_f_score",
+        "fund_accruals_ratio", "fund_dcf_fcf_yield",
+    ]
     fm = add_lag_features(fm, key_signals, lags=[1, 2, 5])
     fm = add_rolling_features(fm, key_signals, windows=[5, 10])
 
@@ -80,10 +119,13 @@ def cmd_train(config: dict):
 
     X_selected = X[selected_features]
 
-    # 4. Train with walk-forward
+    # 4. Train with walk-forward (with optional focal loss)
+    model_cfg = config.get("model", {})
     trainer = WalkForwardTrainer(
-        train_window_years=config["model"]["train_window_years"],
-        val_window_months=config["model"]["validation_window_months"],
+        train_window_years=model_cfg["train_window_years"],
+        val_window_months=model_cfg["validation_window_months"],
+        use_focal_loss=model_cfg.get("use_focal_loss", False),
+        focal_gamma=model_cfg.get("focal_gamma", 2.0),
     )
     models, results = trainer.walk_forward_train(X_selected, y_class)
 
@@ -97,7 +139,7 @@ def cmd_train(config: dict):
             )
 
         # 5. Probability calibration on last fold's validation predictions
-        if config.get("model", {}).get("calibrate_probabilities", True):
+        if model_cfg.get("calibrate_probabilities", True):
             try:
                 last_result = results[-1]
                 if last_result.val_probs is not None and last_result.val_y is not None:
@@ -108,7 +150,7 @@ def cmd_train(config: dict):
                 logger.warning("Calibration skipped: %s", e)
 
         # 6. Adversarial validation for regime shift detection
-        if config.get("model", {}).get("check_regime_shift", True):
+        if model_cfg.get("check_regime_shift", True):
             try:
                 dates = X_selected.index.get_level_values("date").unique().sort_values()
                 midpoint = len(dates) // 2
@@ -161,7 +203,6 @@ def cmd_backtest(config: dict):
 
 def cmd_predict(config: dict):
     """Generate predictions for the latest available date with uncertainty quantification."""
-    import numpy as np
     from models.registry import ModelRegistry
     from models.predict import predict_latest
     from models.uncertainty import ConformalPredictor, UncertaintyDecomposer
@@ -242,12 +283,133 @@ def cmd_analyze(config: dict):
             row["feature"], row["ic"], row["t_stat"], row["p_value"], ic_ir_str,
         )
 
+    # Highlight fundamental features
+    fund_features = [f for f in report["feature"] if f.startswith("fund_")]
+    if fund_features:
+        fund_report = report[report["feature"].isin(fund_features)]
+        logger.info("\n=== Fundamental Feature IC (top 15) ===")
+        for _, row in fund_report.head(15).iterrows():
+            logger.info(
+                "  %-40s  IC=%+.4f  t=%.2f",
+                row["feature"], row["ic"], row["t_stat"],
+            )
+
     # Signal turnover for top features
     logger.info("\nSignal Turnover (top 10):")
     for feat in report.head(10)["feature"]:
         if feat in X.columns:
             to = turnover_analysis(X[feat])
             logger.info("  %-35s  turnover=%.4f", feat, to if to == to else 0)
+
+
+def cmd_screen(config: dict):
+    """Run dynamic screening to find top-quality under-the-radar stocks."""
+    from data.data_manager import DataManager
+    from signals.fundamental_deep import compute_deep_fundamentals, compute_institutional_blindspot
+    from signals.dcf_valuation import compute_dcf_valuation
+    from signals.dynamic_screener import DynamicScreener
+
+    logger.info("=== Dynamic Stock Screening ===")
+    dm = DataManager(config)
+
+    # Load data
+    fundamentals = dm.get_all_fundamentals()
+    statements = dm.get_all_statements()
+    alt_data = dm.get_all_alternative_data()
+    macro = dm.get_macro()
+
+    # Get risk-free rate
+    risk_free_rate = 0.04
+    try:
+        if "treasury_10y" in macro.columns:
+            latest_rate = macro["treasury_10y"].dropna().iloc[-1]
+            if 0 < latest_rate < 0.20:
+                risk_free_rate = latest_rate
+    except Exception:
+        pass
+
+    # Compute deep fundamentals + DCF for all tickers
+    deep_fund_map = {}
+    dcf_map = {}
+    info_map = {}
+
+    for ticker, stmts in statements.items():
+        info = stmts.get("info", {})
+        info_map[ticker] = info
+        try:
+            deep_fund_map[ticker] = compute_deep_fundamentals(stmts, info)
+        except Exception as e:
+            logger.debug("Deep fundamentals failed for %s: %s", ticker, e)
+        try:
+            dcf_map[ticker] = compute_dcf_valuation(stmts, info, risk_free_rate)
+        except Exception as e:
+            logger.debug("DCF failed for %s: %s", ticker, e)
+
+    # Add institutional blindspot signals
+    for ticker in deep_fund_map:
+        adata = alt_data.get(ticker, {})
+        try:
+            blindspot = compute_institutional_blindspot(
+                info_map.get(ticker, {}),
+                adata.get("holders_df", pd.DataFrame()),
+                adata.get("insider_df", pd.DataFrame()),
+            )
+            deep_fund_map[ticker].update(blindspot)
+        except Exception:
+            pass
+
+    # Determine macro regime from VIX
+    macro_regime = "neutral"
+    try:
+        if "vix" in macro.columns:
+            vix = macro["vix"].dropna().iloc[-1]
+            if vix > 25:
+                macro_regime = "risk_off"
+            elif vix < 15:
+                macro_regime = "risk_on"
+            logger.info("VIX: %.1f → macro regime: %s", vix, macro_regime)
+    except Exception:
+        pass
+
+    # Run screener
+    screener = DynamicScreener(top_n=config.get("screening", {}).get("top_n", 50))
+    scores_df = screener.compute_composite_scores(
+        deep_fund_map, dcf_map, info_map, macro_regime
+    )
+
+    logger.info("\n=== Top Stocks by Composite Quality Score ===")
+    logger.info("%-6s  %-8s  %-6s  %-6s  %-6s  %-6s  %-6s  %-6s  %-6s  %s",
+                "Rank", "Ticker", "Score", "Piotr", "ROIC", "CFlow", "BSheet", "DCF", "Blind", "Safe")
+    for _, row in scores_df.head(30).iterrows():
+        logger.info(
+            "%-6d  %-8s  %.3f   %.3f   %.3f   %.3f   %.3f   %.3f   %.3f   %s",
+            int(row.get("rank", 0)),
+            row.get("ticker", ""),
+            row.get("composite_score", 0),
+            row.get("piotroski_score", 0),
+            row.get("roic_spread_score", 0),
+            row.get("cash_flow_score", 0),
+            row.get("balance_sheet_score", 0),
+            row.get("dcf_score", 0),
+            row.get("blindspot_score", 0),
+            "YES" if row.get("passes_safety", False) else "NO",
+        )
+
+    # Show DCF undervaluation for top picks
+    top_tickers = scores_df[scores_df["passes_safety"]].head(10)["ticker"].tolist()
+    if top_tickers and dcf_map:
+        logger.info("\n=== DCF Valuation for Top 10 Picks ===")
+        for t in top_tickers:
+            if t in dcf_map:
+                dcf = dcf_map[t]
+                logger.info(
+                    "  %-8s  intrinsic=$%.2f  margin_of_safety=%.1f%%  ROIC-WACC=%.1f%%  FCF_yield=%.1f%%",
+                    t,
+                    dcf.get("intrinsic_value_per_share", 0),
+                    dcf.get("margin_of_safety", 0) * 100,
+                    dcf.get("roic_vs_wacc_spread", 0) * 100,
+                    dcf.get("fcf_yield", 0) * 100,
+                )
 
 
 def cmd_seed(config: dict):
@@ -275,7 +437,7 @@ def main():
     parser = argparse.ArgumentParser(description="SignalBoard — Algorithmic Trading Signals")
     parser.add_argument(
         "command",
-        choices=["train", "backtest", "predict", "serve", "pipeline", "analyze", "seed"],
+        choices=["train", "backtest", "predict", "serve", "pipeline", "analyze", "seed", "screen"],
         help="Command to run",
     )
     parser.add_argument(
@@ -295,6 +457,7 @@ def main():
         "pipeline": cmd_pipeline,
         "analyze": cmd_analyze,
         "seed": cmd_seed,
+        "screen": cmd_screen,
     }
     commands[args.command](config)
 

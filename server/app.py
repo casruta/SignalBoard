@@ -119,6 +119,22 @@ async def register_device_token(req: DeviceTokenRequest):
     return {"status": "registered"}
 
 
+@app.get("/screened")
+async def get_screened_stocks(limit: int = 20):
+    """Get dynamically screened stocks ranked by composite quality score."""
+    stocks = _db.get_screened_stocks(limit=limit)
+    return {"stocks": stocks, "count": len(stocks)}
+
+
+@app.get("/screened/{ticker}")
+async def get_screened_stock_detail(ticker: str):
+    """Get full analysis detail for a screened stock."""
+    detail = _db.get_screened_stock_detail(ticker.upper())
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"No screened data for {ticker}")
+    return detail
+
+
 @app.post("/pipeline/run")
 async def trigger_pipeline():
     """Manually trigger the daily pipeline (for testing)."""

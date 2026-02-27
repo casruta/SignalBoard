@@ -83,6 +83,62 @@ def add_rolling_features(
     return result
 
 
+def add_multi_horizon_targets(
+    feature_matrix: pd.DataFrame,
+    prices: dict[str, pd.DataFrame],
+    horizons: list[int] = [5, 10, 20],
+    threshold: float = 0.01,
+) -> pd.DataFrame:
+    """Add target columns for multiple horizons.
+
+    For each horizon h, adds:
+    - target_return_{h}d: raw forward return
+    - target_class_{h}d: -1/0/1 classification
+
+    Also keeps the default target_return and target_class columns
+    (set to the middle horizon for backward compatibility).
+
+    Parameters
+    ----------
+    feature_matrix : MultiIndex DataFrame (date, ticker)
+    prices : {ticker: OHLCV DataFrame}
+    horizons : list of forward-looking windows in trading days
+    threshold : return threshold for classification
+
+    Returns
+    -------
+    feature_matrix with additional target columns per horizon
+    """
+    all_targets = []
+    middle_horizon = horizons[len(horizons) // 2]
+
+    for ticker, group in feature_matrix.groupby(level="ticker"):
+        if ticker not in prices:
+            continue
+        close = prices[ticker]["Close"]
+        close_aligned = close.reindex(group.index.get_level_values("date"))
+
+        ticker_data = {}
+        for h in horizons:
+            forward = close_aligned.shift(-h)
+            ret = (forward - close_aligned) / close_aligned
+            ticker_data[f"target_return_{h}d"] = ret.values
+            ticker_data[f"target_class_{h}d"] = _classify(ret.values, threshold=threshold)
+
+        # Backward-compatible default columns use the middle horizon
+        ticker_data["target_return"] = ticker_data[f"target_return_{middle_horizon}d"]
+        ticker_data["target_class"] = ticker_data[f"target_class_{middle_horizon}d"]
+
+        ticker_targets = pd.DataFrame(ticker_data, index=group.index)
+        all_targets.append(ticker_targets)
+
+    if not all_targets:
+        return feature_matrix
+
+    target_df = pd.concat(all_targets)
+    return feature_matrix.join(target_df)
+
+
 def prepare_train_data(
     feature_matrix: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.Series, pd.Series]:

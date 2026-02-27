@@ -1,5 +1,6 @@
 """Walk-forward model training pipeline with purged CV, sample weighting, and temporal ensemble."""
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -9,6 +10,94 @@ import lightgbm as lgb
 from sklearn.metrics import accuracy_score, precision_score, f1_score
 
 from models.registry import ModelRegistry
+
+logger = logging.getLogger(__name__)
+
+NUM_CLASSES = 3
+
+
+def focal_loss_lgb(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    gamma: float = 2.0,
+    alpha: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Focal loss as a custom LightGBM objective for multiclass (3 classes).
+
+    Focal loss: FL = -alpha * (1 - p_t)^gamma * log(p_t)
+
+    Parameters
+    ----------
+    y_true : 1-D array of integer labels (0, 1, 2)
+    y_pred : flattened raw predictions, shape (n_samples * num_classes,)
+    gamma : focusing parameter — higher values down-weight easy examples more
+    alpha : per-class weights array of length num_classes (e.g. inverse frequency)
+
+    Returns
+    -------
+    gradient, hessian : arrays of shape (n_samples * num_classes,)
+    """
+    n_samples = len(y_true)
+    y_true = y_true.astype(int)
+
+    # Reshape raw preds to (n_samples, num_classes) and apply softmax
+    raw = y_pred.reshape(n_samples, NUM_CLASSES)
+    exp_raw = np.exp(raw - raw.max(axis=1, keepdims=True))
+    probs = exp_raw / exp_raw.sum(axis=1, keepdims=True)
+    probs = np.clip(probs, 1e-9, 1 - 1e-9)
+
+    # One-hot encode true labels
+    one_hot = np.zeros_like(probs)
+    one_hot[np.arange(n_samples), y_true] = 1.0
+
+    if alpha is None:
+        alpha = np.ones(NUM_CLASSES)
+    alpha_matrix = alpha[np.newaxis, :]  # (1, num_classes)
+
+    # p_t for true class, broadcast to all class columns
+    p_t = (probs * one_hot).sum(axis=1, keepdims=True)  # (n, 1)
+
+    # Focal weight
+    focal_weight = alpha_matrix * (1 - p_t) ** gamma  # (n, num_classes)
+
+    # Gradient: focal_weight * (probs - one_hot)
+    gradient = focal_weight * (probs - one_hot)
+
+    # Hessian (diagonal approximation): focal_weight * probs * (1 - probs)
+    hessian = focal_weight * probs * (1 - probs)
+    hessian = np.maximum(hessian, 1e-9)
+
+    return gradient.flatten(), hessian.flatten()
+
+
+def focal_loss_eval(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    gamma: float = 2.0,
+    alpha: np.ndarray | None = None,
+) -> tuple[str, float, bool]:
+    """Compute focal loss as a LightGBM evaluation metric.
+
+    Returns
+    -------
+    (metric_name, metric_value, is_higher_better)
+    """
+    n_samples = len(y_true)
+    y_true = y_true.astype(int)
+
+    raw = y_pred.reshape(n_samples, NUM_CLASSES)
+    exp_raw = np.exp(raw - raw.max(axis=1, keepdims=True))
+    probs = exp_raw / exp_raw.sum(axis=1, keepdims=True)
+    probs = np.clip(probs, 1e-9, 1 - 1e-9)
+
+    if alpha is None:
+        alpha = np.ones(NUM_CLASSES)
+
+    p_t = probs[np.arange(n_samples), y_true]
+    alpha_t = alpha[y_true]
+    loss = -alpha_t * (1 - p_t) ** gamma * np.log(p_t)
+
+    return "focal_loss", float(loss.mean()), False
 
 
 @dataclass
@@ -87,6 +176,8 @@ class WalkForwardTrainer:
         early_stopping_rounds: int = 50,
         keep_last_n_models: int = 3,
         use_sample_weights: bool = True,
+        use_focal_loss: bool = False,
+        focal_gamma: float = 2.0,
         params: dict | None = None,
     ):
         self.train_years = train_window_years
@@ -97,6 +188,8 @@ class WalkForwardTrainer:
         self.early_stop = early_stopping_rounds
         self.keep_last_n = keep_last_n_models
         self.use_sample_weights = use_sample_weights
+        self.use_focal_loss = use_focal_loss
+        self.focal_gamma = focal_gamma
         self.params = {**self.DEFAULT_PARAMS, **(params or {})}
         self.registry = ModelRegistry()
 
@@ -150,8 +243,36 @@ class WalkForwardTrainer:
             train_set = lgb.Dataset(X_train, label=y_train, weight=weights)
             val_set = lgb.Dataset(X_val, label=y_val, reference=train_set)
 
+            # Focal loss setup
+            focal_kwargs = {}
+            train_params = dict(self.params)
+            if self.use_focal_loss:
+                # Compute class weights from training distribution (inverse frequency)
+                class_counts = np.bincount(y_train.values.astype(int), minlength=NUM_CLASSES)
+                class_weights = len(y_train) / (NUM_CLASSES * np.maximum(class_counts, 1))
+                class_weights = class_weights / class_weights.sum() * NUM_CLASSES
+
+                gamma = self.focal_gamma
+
+                def focal_loss_objective(y_true, y_pred):
+                    return focal_loss_lgb(y_true, y_pred, gamma=gamma, alpha=class_weights)
+
+                def focal_loss_metric(y_true, y_pred):
+                    return focal_loss_eval(y_true, y_pred, gamma=gamma, alpha=class_weights)
+
+                # Remove conflicting params for custom objective
+                train_params.pop("objective", None)
+                train_params.pop("metric", None)
+
+                focal_kwargs["fobj"] = focal_loss_objective
+                focal_kwargs["feval"] = focal_loss_metric
+                logger.info(
+                    "Fold %d: using focal loss (gamma=%.1f, class_weights=%s)",
+                    fold, gamma, class_weights.round(3),
+                )
+
             model = lgb.train(
-                self.params,
+                train_params,
                 train_set,
                 num_boost_round=self.num_rounds,
                 valid_sets=[val_set],
@@ -159,6 +280,7 @@ class WalkForwardTrainer:
                     lgb.early_stopping(self.early_stop, verbose=False),
                     lgb.log_evaluation(period=0),
                 ],
+                **focal_kwargs,
             )
 
             # Evaluate

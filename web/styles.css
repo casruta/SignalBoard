@@ -6,6 +6,7 @@
   --muted: #999;
   --rule: #d4d0c8;
   --red: #c0392b;
+  --accent: #2c5f2d;
   --overlay-bg: rgba(0, 0, 0, 0.4);
 }
 
@@ -26,7 +27,8 @@ body[data-page="list"] {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
+  padding-top: 3rem;
 }
 
 .about-btn {
@@ -41,7 +43,7 @@ body[data-page="list"] {
   border-radius: 0;
   padding: 0.5rem 1.6rem;
   cursor: pointer;
-  margin-bottom: 2.5rem;
+  margin-bottom: 2rem;
   transition: color 0.3s ease, border-color 0.3s ease;
   opacity: 0;
   animation: fadeIn 1s ease forwards 0.2s;
@@ -53,7 +55,7 @@ body[data-page="list"] {
 }
 
 .container {
-  width: min(85vw, 420px);
+  width: min(90vw, 480px);
   opacity: 0;
   animation: fadeIn 1s ease forwards 0.5s;
 }
@@ -64,13 +66,13 @@ body[data-page="list"] {
   background: var(--rule);
 }
 
+/* ── Ticker row (list items) ──────────────────────────────── */
+
 .ticker-row {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 1.4rem 0;
+  gap: 8px;
+  padding: 1.2rem 0.5rem;
   text-decoration: none;
   color: inherit;
   transition: opacity 0.3s ease;
@@ -80,12 +82,51 @@ body[data-page="list"] {
   opacity: 0.55;
 }
 
+.row-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.rank {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  font-weight: 300;
+  color: var(--muted);
+  min-width: 24px;
+}
+
+.row-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .symbol {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 1.15rem;
+  font-size: 1.05rem;
   font-weight: 500;
   letter-spacing: 0.04em;
   line-height: 1;
+}
+
+.name-label {
+  font-size: 0.65rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+
+.score {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.1rem;
+  font-weight: 500;
+  color: var(--fg);
+  min-width: 32px;
+  text-align: right;
 }
 
 .industry {
@@ -93,10 +134,53 @@ body[data-page="list"] {
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--muted);
+  padding-left: 36px;
 }
 
+/* ── Mini score bars (list view) ──────────────────────────── */
+
+.score-bars {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 16px;
+  padding-left: 36px;
+  padding-right: 32px;
+}
+
+.mini-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mini-label {
+  font-size: 0.5rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  min-width: 64px;
+}
+
+.mini-track {
+  flex: 1;
+  height: 2px;
+  background: var(--rule);
+  border-radius: 1px;
+  overflow: hidden;
+}
+
+.mini-fill {
+  height: 100%;
+  background: var(--fg);
+  border-radius: 1px;
+  transition: width 0.5s ease;
+}
+
+/* ── Footer ──────────────────────────────────────────────── */
+
 .footer {
-  margin-top: 2.5rem;
+  margin-top: 2rem;
+  margin-bottom: 2rem;
   font-size: 0.55rem;
   letter-spacing: 0.25em;
   text-transform: uppercase;
@@ -208,9 +292,17 @@ body[data-page="list"] {
 /* ── Mobile ───────────────────────────────────────────────── */
 
 @media (max-width: 540px) {
-  .symbol { font-size: 1rem; }
-  .ticker-row { padding: 1.2rem 0; }
-  .container { width: min(90vw, 360px); }
+  .symbol { font-size: 0.95rem; }
+  .ticker-row { padding: 1rem 0.25rem; }
+  .container { width: min(95vw, 400px); }
+  .score-bars { padding-left: 24px; padding-right: 16px; }
+  .mini-label { min-width: 54px; font-size: 0.45rem; }
+  .detail-container { padding: 16px 14px 60px; }
+  .score-grid { gap: 8px; }
+  .sc-label { font-size: 0.55rem; }
+  .sc-pct { font-size: 0.7rem; }
+  .metric-label { font-size: 0.7rem; }
+  .metric-value { font-size: 0.7rem; }
 }
 
 /* ── Detail page ──────────────────────────────────────────── */
@@ -296,6 +388,29 @@ body[data-page="detail"] {
   margin-top: 8px;
 }
 
+/* Composite score (detail header) */
+.composite-score {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.composite-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 2.4rem;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.composite-label {
+  font-family: 'EB Garamond', Georgia, serif;
+  font-size: 0.8rem;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+}
+
 .confidence-bar {
   margin-top: 16px;
 }
@@ -345,7 +460,95 @@ body[data-page="detail"] {
   color: var(--fg);
 }
 
-/* Empty / loading states */
+/* ── Score grid (detail page) ─────────────────────────────── */
+
+.score-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.score-card {
+  padding: 10px 0;
+}
+
+.sc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+
+.sc-label {
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sc-pct {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.sc-bar {
+  height: 3px;
+  background: var(--rule);
+  border-radius: 1.5px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.sc-fill {
+  height: 100%;
+  background: var(--fg);
+  border-radius: 1.5px;
+}
+
+.sc-detail {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.6rem;
+  color: var(--muted);
+}
+
+/* ── Metric grid ──────────────────────────────────────────── */
+
+.metric-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.metric-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(212, 208, 200, 0.4);
+  gap: 12px;
+  overflow: hidden;
+}
+
+.metric-row:last-child {
+  border-bottom: none;
+}
+
+.metric-label {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.metric-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  font-weight: 400;
+  flex-shrink: 0;
+  text-align: right;
+}
+
+/* ── Empty / loading states ───────────────────────────────── */
+
 .empty-state {
   display: flex;
   flex-direction: column;
