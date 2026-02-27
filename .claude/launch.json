@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "signalboard",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["main.py", "serve"],
+      "port": 8000
+    }
+  ]
+}

@@ -250,6 +250,14 @@ def cmd_analyze(config: dict):
             logger.info("  %-35s  turnover=%.4f", feat, to if to == to else 0)
 
 
+def cmd_seed(config: dict):
+    """Seed the database with mock trading recommendations."""
+    from server.seed import seed
+    db_path = config["server"]["database_path"]
+    seed(db_path)
+    logger.info("Database seeded successfully")
+
+
 def cmd_serve(config: dict):
     """Start the FastAPI server."""
     from server.app import main as run_server
@@ -267,7 +275,7 @@ def main():
     parser = argparse.ArgumentParser(description="SignalBoard — Algorithmic Trading Signals")
     parser.add_argument(
         "command",
-        choices=["train", "backtest", "predict", "serve", "pipeline", "analyze"],
+        choices=["train", "backtest", "predict", "serve", "pipeline", "analyze", "seed"],
         help="Command to run",
     )
     parser.add_argument(
@@ -286,6 +294,7 @@ def main():
         "serve": cmd_serve,
         "pipeline": cmd_pipeline,
         "analyze": cmd_analyze,
+        "seed": cmd_seed,
     }
     commands[args.command](config)
 

@@ -1,10 +1,13 @@
-"""FastAPI application — REST API for the iOS app."""
+"""FastAPI application — REST API + web frontend."""
 
 import asyncio
 import logging
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -86,6 +89,7 @@ async def get_signals():
             "action": s.get("action"),
             "confidence": s.get("confidence"),
             "predicted_return_5d": s.get("predicted_return_5d"),
+            "entry_price": s.get("entry_price"),
             "sector": s.get("sector"),
             "generated_at": s.get("generated_at"),
         })
@@ -120,6 +124,25 @@ async def trigger_pipeline():
     """Manually trigger the daily pipeline (for testing)."""
     results = await run_daily_pipeline(_config)
     return {"status": "complete", "signals_generated": len(results)}
+
+
+# ── Web frontend ─────────────────────────────────────────────
+
+_web_dir = Path(__file__).resolve().parent.parent / "web"
+
+
+@app.get("/detail.html")
+async def detail_page():
+    return FileResponse(_web_dir / "detail.html")
+
+
+# Mount static files (CSS, JS) — must come after API routes
+app.mount("/static", StaticFiles(directory=str(_web_dir)), name="static")
+
+
+@app.get("/")
+async def index_page():
+    return FileResponse(_web_dir / "index.html")
 
 
 # ── Run directly ─────────────────────────────────────────────────

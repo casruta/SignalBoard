@@ -133,6 +133,12 @@ class Database:
                 for r in rows
             ]
 
+    def clear_all_recommendations(self) -> None:
+        """Delete all recommendations from the database."""
+        with self._session() as session:
+            session.query(RecommendationRow).delete()
+            session.commit()
+
     # ── Device Tokens ────────────────────────────────────────────
 
     def save_device_token(self, token: str) -> None:

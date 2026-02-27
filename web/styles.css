@@ -1,0 +1,395 @@
+/* SignalBoard — minimalist design system */
+
+:root {
+  --bg: #f7f5f0;
+  --fg: #1a1a1a;
+  --muted: #999;
+  --rule: #d4d0c8;
+  --red: #c0392b;
+  --overlay-bg: rgba(0, 0, 0, 0.4);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-weight: 300;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Landing page (list) ──────────────────────────────────── */
+
+body[data-page="list"] {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.about-btn {
+  font-family: 'EB Garamond', Georgia, serif;
+  font-size: 0.85rem;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: none;
+  border: 1px solid var(--rule);
+  border-radius: 0;
+  padding: 0.5rem 1.6rem;
+  cursor: pointer;
+  margin-bottom: 2.5rem;
+  transition: color 0.3s ease, border-color 0.3s ease;
+  opacity: 0;
+  animation: fadeIn 1s ease forwards 0.2s;
+}
+
+.about-btn:hover {
+  color: var(--fg);
+  border-color: var(--fg);
+}
+
+.container {
+  width: min(85vw, 420px);
+  opacity: 0;
+  animation: fadeIn 1s ease forwards 0.5s;
+}
+
+.rule {
+  border: none;
+  height: 1px;
+  background: var(--rule);
+}
+
+.ticker-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 1.4rem 0;
+  text-decoration: none;
+  color: inherit;
+  transition: opacity 0.3s ease;
+}
+
+.ticker-row:hover {
+  opacity: 0.55;
+}
+
+.symbol {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.15rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+
+.industry {
+  font-size: 0.55rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.footer {
+  margin-top: 2.5rem;
+  font-size: 0.55rem;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  opacity: 0;
+  animation: fadeIn 1s ease forwards 0.8s;
+}
+
+.dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--fg);
+  animation: pulse 3s ease-in-out infinite;
+}
+
+.loading-placeholder {
+  height: 200px;
+}
+
+/* ── About overlay ────────────────────────────────────────── */
+
+.about-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay-bg);
+  z-index: 200;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.about-overlay.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.about-panel {
+  background: var(--bg);
+  max-width: 480px;
+  width: 90vw;
+  padding: 3rem 2.5rem;
+  position: relative;
+  transform: translateY(20px);
+  opacity: 0;
+  transition: transform 0.4s ease, opacity 0.4s ease;
+}
+
+.about-overlay.open .about-panel {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+.about-close {
+  position: absolute;
+  top: 1rem;
+  right: 1.5rem;
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.2s;
+  line-height: 1;
+}
+
+.about-close:hover {
+  color: var(--fg);
+}
+
+.about-title {
+  font-family: 'EB Garamond', Georgia, serif;
+  font-size: 1.6rem;
+  font-weight: 500;
+  margin-bottom: 1.5rem;
+  letter-spacing: 0.02em;
+}
+
+.about-text {
+  font-size: 0.85rem;
+  line-height: 1.7;
+  color: var(--fg);
+  margin-bottom: 1rem;
+}
+
+.about-text.muted {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* ── Animations ───────────────────────────────────────────── */
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+
+/* ── Mobile ───────────────────────────────────────────────── */
+
+@media (max-width: 540px) {
+  .symbol { font-size: 1rem; }
+  .ticker-row { padding: 1.2rem 0; }
+  .container { width: min(90vw, 360px); }
+}
+
+/* ── Detail page ──────────────────────────────────────────── */
+
+body[data-page="detail"] {
+  display: block;
+}
+
+.detail-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--rule);
+}
+
+.detail-topbar h1 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+.back-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: 'EB Garamond', Georgia, serif;
+  font-size: 0.9rem;
+  font-weight: 400;
+  color: var(--muted);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.back-btn:hover {
+  color: var(--fg);
+}
+
+.back-btn .chevron {
+  font-size: 1.1rem;
+}
+
+.detail-container {
+  max-width: 540px;
+  margin: 0 auto;
+  padding: 24px 20px 60px;
+}
+
+/* Detail header */
+.detail-header {
+  text-align: center;
+  padding: 24px 0 28px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.detail-header .ticker {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 2rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+.detail-header .name {
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 4px;
+  display: block;
+}
+
+.sector-label {
+  display: block;
+  font-size: 0.6rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 8px;
+}
+
+.confidence-bar {
+  margin-top: 16px;
+}
+
+.confidence-value {
+  font-family: 'EB Garamond', Georgia, serif;
+  font-size: 1rem;
+  color: var(--muted);
+}
+
+/* Explanation sections */
+.explanation-section {
+  margin-top: 24px;
+  padding: 20px 0;
+  border-top: 1px solid var(--rule);
+}
+
+.explanation-section .section-title {
+  font-family: 'EB Garamond', Georgia, serif;
+  font-size: 1rem;
+  font-weight: 500;
+  margin-bottom: 12px;
+  color: var(--fg);
+}
+
+.explanation-section ul {
+  list-style: none;
+  padding: 0;
+}
+
+.explanation-section li {
+  font-size: 0.82rem;
+  line-height: 1.65;
+  padding: 3px 0;
+  color: var(--fg);
+}
+
+.explanation-section li::before {
+  content: "\2014";
+  margin-right: 8px;
+  color: var(--muted);
+}
+
+.explanation-section p {
+  font-size: 0.82rem;
+  line-height: 1.65;
+  color: var(--fg);
+}
+
+/* Empty / loading states */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 32px;
+  text-align: center;
+}
+
+.empty-state .icon {
+  font-size: 2rem;
+  margin-bottom: 16px;
+  opacity: 0.3;
+}
+
+.empty-state .title {
+  font-family: 'EB Garamond', Georgia, serif;
+  font-size: 1.1rem;
+  color: var(--fg);
+  margin-bottom: 4px;
+}
+
+.empty-state .subtitle {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 32px;
+}
+
+.loading::after {
+  content: "";
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--rule);
+  border-top-color: var(--fg);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

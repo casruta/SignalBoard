@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SignalBoard</title>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body data-page="list">
+
+  <button class="about-btn" id="about-btn">About</button>
+
+  <div class="container" id="ticker-container">
+    <div class="loading-placeholder"></div>
+  </div>
+
+  <div class="footer"><span class="dot"></span> Live</div>
+
+  <!-- About overlay -->
+  <div class="about-overlay" id="about-overlay">
+    <div class="about-panel" id="about-panel">
+      <button class="about-close" id="about-close">&times;</button>
+      <h2 class="about-title">SignalBoard</h2>
+      <p class="about-text">
+        A fundamentals-driven signal engine that surfaces equities with strong
+        underlying business quality. The system scores companies across balance
+        sheet health, earnings consistency, cash flow generation, and
+        competitive positioning &mdash; with a particular focus on mid-cap
+        names in niche industries that institutional coverage often overlooks.
+      </p>
+      <p class="about-text">
+        An ensemble machine learning model synthesizes over 100 quantitative
+        features, applying walk-forward validation and SHAP-based explainability
+        to identify which fundamental drivers matter most for each pick.
+        Signals are ranked by confidence and filtered through sector-level
+        constraints before reaching this page.
+      </p>
+      <p class="about-text muted">
+        The three tickers shown are today's highest-conviction opportunities
+        &mdash; companies the algorithm believes offer durable fundamental value.
+      </p>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
