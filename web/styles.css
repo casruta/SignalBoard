@@ -1170,26 +1170,73 @@ body[data-page="detail"] {
 }
 
 .verdict-summary {
-  font-family: 'EB Garamond', Georgia, serif;
-  font-size: 0.95rem;
-  line-height: 1.7;
-  font-style: italic;
+  font-size: 0.75rem;
+  line-height: 1.8;
+  font-style: normal;
   max-width: 600px;
-  margin: 0 auto;
 }
 
 /* ── Thesis section ──────────────────────────────────────── */
 
-.thesis-text {
-  font-family: 'EB Garamond', Georgia, serif;
-  font-size: 1.05rem;
-  line-height: 1.7;
-  font-style: italic;
+.thesis-section {
+  position: relative;
+  background: #fff;
+  border: 1px solid rgba(212, 208, 200, 0.5);
+  border-radius: 3px;
+  padding: 20px 24px;
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.04),
+    0 4px 12px rgba(0, 0, 0, 0.03);
+  overflow: hidden;
 }
 
-.thesis-section {
-  border-left: 3px solid var(--accent);
-  padding-left: 16px;
+.thesis-section::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 3px;
+  height: 100%;
+  background: var(--fg);
+  animation: thesis-accent 2s ease-out forwards;
+}
+
+@keyframes thesis-accent {
+  from { height: 0; }
+  to   { height: 100%; }
+}
+
+.thesis-section::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, rgba(26,26,26,0.02) 0%, transparent 60%);
+  pointer-events: none;
+}
+
+.thesis-text {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  line-height: 1.8;
+  font-style: normal;
+  font-weight: 300;
+  position: relative;
+  z-index: 1;
+}
+
+.thesis-label {
+  display: block;
+  font-size: 0.55rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 10px;
+  position: relative;
+  z-index: 1;
 }
 
 /* ── Moat rating ─────────────────────────────────────────── */

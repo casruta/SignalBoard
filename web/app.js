@@ -356,7 +356,7 @@
 
         function renderThesis(t) {
             if (!t || !t.text) return "";
-            return '<div class="thesis-section"><p class="thesis-text">' + escapeHtml(t.text) + '</p></div>';
+            return '<div class="thesis-section"><span class="thesis-label">Core Thesis</span><p class="thesis-text">' + escapeHtml(t.text) + '</p></div>';
         }
 
         function renderSnapshot(s) {
