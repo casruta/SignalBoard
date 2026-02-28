@@ -629,24 +629,25 @@ body[data-page="detail"] {
 
 /* ── Report detail page ──────────────────────────────────── */
 
-/* Report layout: single column */
+/* Report layout: sidebar TOC + content */
 .report-layout {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  align-items: flex-start;
+  max-width: 920px;
+  margin: 0 auto;
 }
 
-/* Active TOC — inline sticky menu */
+/* Sidebar TOC — sticky left rail */
 .report-toc {
   position: sticky;
   top: 49px;
   z-index: 90;
-  background: var(--bg);
-  border-bottom: 1px solid var(--rule);
-  padding: 0;
-  width: 100%;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
+  width: 180px;
+  flex-shrink: 0;
+  padding: 20px 0 20px 16px;
+  align-self: flex-start;
+  max-height: calc(100vh - 49px);
+  overflow-y: auto;
   scrollbar-width: none;
 }
 
@@ -655,29 +656,29 @@ body[data-page="detail"] {
 }
 
 .toc-title {
-  display: none; /* hide the old "Contents" title */
+  display: none;
 }
 
 .report-toc ul {
   display: flex;
+  flex-direction: column;
   gap: 0;
   list-style: none;
-  padding: 0 16px;
+  padding: 0;
   margin: 0;
-  white-space: nowrap;
 }
 
 .report-toc li a {
   display: block;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.6rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-size: 0.58rem;
+  letter-spacing: 0.03em;
   color: var(--muted);
   text-decoration: none;
-  padding: 10px 12px;
-  border-bottom: 2px solid transparent;
-  transition: color 0.2s, border-color 0.2s;
+  padding: 5px 12px 5px 0;
+  border-left: 2px solid transparent;
+  padding-left: 10px;
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
 }
 
 .report-toc li a:hover {
@@ -686,8 +687,8 @@ body[data-page="detail"] {
 
 .report-toc li a.active {
   color: var(--fg);
-  font-weight: 500;
-  border-bottom-color: var(--fg);
+  border-left-color: var(--fg);
+  background: rgba(26, 26, 26, 0.04);
 }
 
 .report-container {
@@ -699,9 +700,10 @@ body[data-page="detail"] {
 }
 
 .report-layout .detail-container {
-  max-width: 680px;
-  margin: 0 auto;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
+  max-width: 700px;
+  padding: 0 24px 60px;
 }
 
 /* ── Report sections ─────────────────────────────────────── */
@@ -973,12 +975,12 @@ body[data-page="detail"] {
   background: rgba(212, 208, 200, 0.08);
 }
 
-.fin-table .row-header {
-  font-weight: 500;
+.fin-table .row-header td {
+  background: rgba(26, 26, 26, 0.06);
 }
 
-.fin-table .row-subtotal {
-  font-weight: 500;
+.fin-table .row-subtotal td {
+  background: rgba(26, 26, 26, 0.04);
   border-top: 1px solid var(--rule);
 }
 
@@ -1024,9 +1026,8 @@ body[data-page="detail"] {
 }
 
 .sensitivity-grid td.base-case {
-  background: rgba(44, 95, 45, 0.25);
-  font-weight: 700;
-  border: 2px solid var(--fg);
+  background: rgba(26, 26, 26, 0.08);
+  border: 1px solid var(--fg);
 }
 
 /* ── Snapshot grid ───────────────────────────────────────── */
@@ -1096,9 +1097,9 @@ body[data-page="detail"] {
   background: rgba(212, 208, 200, 0.08);
 }
 
-.comps-table .peer-median-row {
+.comps-table .peer-median-row td {
   border-top: 2px solid var(--rule);
-  font-weight: 500;
+  background: rgba(26, 26, 26, 0.04);
 }
 
 .comps-table .premium-discount-row {
@@ -1106,13 +1107,8 @@ body[data-page="detail"] {
   color: var(--muted);
 }
 
-.comps-table .subject-row {
-  background: rgba(44, 95, 45, 0.06);
-  font-weight: 500;
-}
-
 .comps-table .subject-row td {
-  font-weight: 500;
+  background: rgba(26, 26, 26, 0.06);
 }
 
 /* ── Risk table ──────────────────────────────────────────── */
@@ -1268,17 +1264,16 @@ body[data-page="detail"] {
 /* ── Report mobile overrides ─────────────────────────────── */
 
 @media (max-width: 768px) {
-  .report-toc ul {
-    padding: 0 8px;
+  .report-layout {
+    flex-direction: column;
   }
-  .report-toc li a {
-    padding: 8px 8px;
-    font-size: 0.55rem;
+  .report-toc {
+    display: none;
   }
   .report-layout .detail-container {
-    padding: 12px 12px 60px;
+    padding: 12px 14px 60px;
+    max-width: 100%;
   }
-
   .report-container {
     max-width: 100%;
     padding: 16px 14px 60px;
