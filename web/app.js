@@ -12,22 +12,25 @@
 
     function initListPage() {
         var container = document.getElementById("ticker-container");
-        var aboutBtn = document.getElementById("about-btn");
-        var aboutOverlay = document.getElementById("about-overlay");
-        var aboutClose = document.getElementById("about-close");
-
-        // About toggle
-        aboutBtn.addEventListener("click", function () {
-            aboutOverlay.classList.add("open");
+        // Wire nav buttons to overlays
+        document.querySelectorAll(".nav-btn").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+                var id = btn.getAttribute("data-overlay");
+                var overlay = document.getElementById(id);
+                if (overlay) overlay.classList.add("open");
+            });
         });
 
-        function closeAbout() {
-            aboutOverlay.classList.remove("open");
-        }
-
-        aboutClose.addEventListener("click", closeAbout);
-        aboutOverlay.addEventListener("click", function (e) {
-            if (e.target === aboutOverlay) closeAbout();
+        document.querySelectorAll(".overlay").forEach(function (overlay) {
+            var closeBtn = overlay.querySelector(".overlay-close");
+            if (closeBtn) {
+                closeBtn.addEventListener("click", function () {
+                    overlay.classList.remove("open");
+                });
+            }
+            overlay.addEventListener("click", function (e) {
+                if (e.target === overlay) overlay.classList.remove("open");
+            });
         });
 
         fetchScreenedStocks();
@@ -81,6 +84,13 @@
                 html += renderStockRow(stocks[i], i);
                 html += '<hr class="rule">';
             }
+            // Pick generation date
+            if (stocks.length > 0 && stocks[0].generated_at) {
+                var d = new Date(stocks[0].generated_at);
+                var months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+                var dateStr = months[d.getMonth()] + " " + d.getDate() + ", " + d.getFullYear();
+                html += '<div class="pick-date">Picks generated ' + dateStr + '</div>';
+            }
             container.innerHTML = html;
         }
 
@@ -107,6 +117,9 @@
             html += miniBar("Cash Flow", s.cash_flow_score);
             html += miniBar("DCF", s.dcf_score);
             html += miniBar("Balance Sheet", s.balance_sheet_score);
+            html += miniBar("Blindspot", s.blindspot_score);
+            html += miniBar("Margins", s.margin_score);
+            html += miniBar("ROIC Spread", s.roic_spread_score);
             html += '</div>';
 
             html += '<span class="industry">' + escapeHtml(s.sector || "") + '</span>';

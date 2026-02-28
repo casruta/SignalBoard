@@ -433,8 +433,20 @@ MOCK_SIGNALS = [
 ]
 
 
+MOCK_SCREENED = [
+    {"ticker": "CEIX", "short_name": "CONSOL Energy", "sector": "Energy", "industry": "Coal", "market_cap": 4_000_000_000, "composite_score": 0.91, "rank": 1, "piotroski_score": 0.89, "cash_flow_score": 0.93, "dcf_score": 0.88, "balance_sheet_score": 0.85, "blindspot_score": 0.92, "margin_score": 0.78, "roic_spread_score": 0.95},
+    {"ticker": "CALX", "short_name": "Calix Inc.", "sector": "Technology", "industry": "Networking", "market_cap": 3_000_000_000, "composite_score": 0.86, "rank": 2, "piotroski_score": 0.78, "cash_flow_score": 0.72, "dcf_score": 0.85, "balance_sheet_score": 0.80, "blindspot_score": 0.88, "margin_score": 0.82, "roic_spread_score": 0.74},
+    {"ticker": "BOOT", "short_name": "Boot Barn Holdings", "sector": "Consumer Discretionary", "industry": "Specialty Retail", "market_cap": 4_000_000_000, "composite_score": 0.88, "rank": 3, "piotroski_score": 0.78, "cash_flow_score": 0.81, "dcf_score": 0.76, "balance_sheet_score": 0.83, "blindspot_score": 0.70, "margin_score": 0.85, "roic_spread_score": 0.90},
+    {"ticker": "HIMS", "short_name": "Hims & Hers Health", "sector": "Healthcare", "industry": "Telehealth", "market_cap": 6_000_000_000, "composite_score": 0.84, "rank": 4, "piotroski_score": 0.65, "cash_flow_score": 0.58, "dcf_score": 0.82, "balance_sheet_score": 0.60, "blindspot_score": 0.85, "margin_score": 0.72, "roic_spread_score": 0.55},
+    {"ticker": "ITT", "short_name": "ITT Inc.", "sector": "Industrials", "industry": "Precision Components", "market_cap": 12_000_000_000, "composite_score": 0.87, "rank": 5, "piotroski_score": 0.89, "cash_flow_score": 0.91, "dcf_score": 0.73, "balance_sheet_score": 0.92, "blindspot_score": 0.55, "margin_score": 0.88, "roic_spread_score": 0.92},
+    {"ticker": "STEP", "short_name": "StepStone Group", "sector": "Financials", "industry": "Asset Management", "market_cap": 7_000_000_000, "composite_score": 0.85, "rank": 6, "piotroski_score": 0.78, "cash_flow_score": 0.82, "dcf_score": 0.79, "balance_sheet_score": 0.75, "blindspot_score": 0.90, "margin_score": 0.80, "roic_spread_score": 0.85},
+    {"ticker": "GKOS", "short_name": "Glaukos Corp.", "sector": "Healthcare", "industry": "Medical Devices", "market_cap": 5_000_000_000, "composite_score": 0.83, "rank": 7, "piotroski_score": 0.60, "cash_flow_score": 0.55, "dcf_score": 0.90, "balance_sheet_score": 0.65, "blindspot_score": 0.82, "margin_score": 0.92, "roic_spread_score": 0.60},
+    {"ticker": "STLD", "short_name": "Steel Dynamics", "sector": "Materials", "industry": "Steel", "market_cap": 18_000_000_000, "composite_score": 0.86, "rank": 8, "piotroski_score": 0.89, "cash_flow_score": 0.87, "dcf_score": 0.78, "balance_sheet_score": 0.90, "blindspot_score": 0.45, "margin_score": 0.82, "roic_spread_score": 0.88},
+]
+
+
 def seed(db_path: str) -> None:
-    """Clear existing data and insert mock recommendations."""
+    """Clear existing data and insert mock recommendations and screened stocks."""
     db = Database(db_path)
     db.clear_all_recommendations()
 
@@ -444,3 +456,6 @@ def seed(db_path: str) -> None:
 
     db.save_recommendations(MOCK_SIGNALS)
     logger.info("Seeded %d mock recommendations", len(MOCK_SIGNALS))
+
+    db.save_screened_stocks(MOCK_SCREENED)
+    logger.info("Seeded %d mock screened stocks", len(MOCK_SCREENED))

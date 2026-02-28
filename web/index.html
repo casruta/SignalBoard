@@ -9,7 +9,11 @@
 </head>
 <body data-page="list">
 
-  <button class="about-btn" id="about-btn">About</button>
+  <nav class="nav-row">
+    <button class="nav-btn" data-overlay="project-overlay">About This Project</button>
+    <button class="nav-btn" data-overlay="model-overlay">About This Model</button>
+    <button class="nav-btn" data-overlay="picks-overlay">Past Picks</button>
+  </nav>
 
   <div class="container" id="ticker-container">
     <div class="loading-placeholder"></div>
@@ -17,29 +21,70 @@
 
   <div class="footer"><span class="dot"></span> Live</div>
 
-  <!-- About overlay -->
-  <div class="about-overlay" id="about-overlay">
-    <div class="about-panel" id="about-panel">
-      <button class="about-close" id="about-close">&times;</button>
-      <h2 class="about-title">About SignalBoard</h2>
-      <p class="about-text">
+  <!-- Project overlay -->
+  <div class="overlay" id="project-overlay">
+    <div class="overlay-panel">
+      <button class="overlay-close">&times;</button>
+      <h2 class="overlay-title">About This Project</h2>
+      <p class="overlay-text">
         Finds diamonds in the dirt. A fundamentals-driven engine focused on
         small-mid cap equities ($300M&ndash;$20B) &mdash; the under-researched,
         undervalued, quality companies that institutional coverage overlooks.
       </p>
-      <p class="about-text">
+      <p class="overlay-text">
         Every stock is scored across five dimensions:
       </p>
-      <ul class="about-list">
+      <ul class="overlay-list">
         <li>Strong fundamentals (Piotroski F-Score)</li>
         <li>DCF valuation with margin of safety</li>
         <li>Low analyst coverage (institutional blindspot)</li>
         <li>Positive free cash flow trends</li>
         <li>ROIC exceeding cost of capital</li>
       </ul>
-      <p class="about-text muted">
+      <p class="overlay-text muted">
         Avoid the mega-caps everyone owns. Find the next great company
         before Wall Street does.
+      </p>
+    </div>
+  </div>
+
+  <!-- Model overlay -->
+  <div class="overlay" id="model-overlay">
+    <div class="overlay-panel">
+      <button class="overlay-close">&times;</button>
+      <h2 class="overlay-title">About This Model</h2>
+      <p class="overlay-text">
+        SignalBoard scores every stock across seven quantitative dimensions,
+        each normalized to 0&ndash;100:
+      </p>
+      <ul class="overlay-list">
+        <li>Piotroski F-Score &mdash; financial strength (profitability, leverage, efficiency)</li>
+        <li>Cash Flow &mdash; free cash flow yield and trend consistency</li>
+        <li>DCF Valuation &mdash; intrinsic value vs market price with margin of safety</li>
+        <li>Balance Sheet &mdash; debt-to-equity, current ratio, net cash position</li>
+        <li>Blindspot &mdash; low analyst coverage signals institutional under-ownership</li>
+        <li>Margins &mdash; gross and operating margin quality vs sector peers</li>
+        <li>ROIC Spread &mdash; return on invested capital minus weighted average cost of capital</li>
+      </ul>
+      <p class="overlay-text">
+        A composite score weights these dimensions and ranks the universe daily.
+        The ensemble ML model (LightGBM) then assigns BUY/SELL probabilities
+        using walk-forward validation with isotonic calibration.
+      </p>
+      <p class="overlay-text muted">
+        Target horizon: 10 trading days. Retrained monthly. Vol-scaled thresholds per ticker.
+      </p>
+    </div>
+  </div>
+
+  <!-- Past Picks overlay -->
+  <div class="overlay" id="picks-overlay">
+    <div class="overlay-panel">
+      <button class="overlay-close">&times;</button>
+      <h2 class="overlay-title">Past Picks</h2>
+      <p class="overlay-text muted">
+        Historical picks and their outcomes will appear here once the daily
+        pipeline has run for multiple cycles. Check back soon.
       </p>
     </div>
   </div>

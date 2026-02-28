@@ -29,33 +29,37 @@ body[data-page="list"] {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-start;
-  padding-top: 3rem;
+  justify-content: center;
 }
 
-.about-btn {
+.nav-row {
+  display: flex;
+  gap: 1.5rem;
+  justify-content: center;
+  opacity: 0;
+  animation: fadeIn 1s ease forwards 0.2s;
+  margin-bottom: 0.5rem;
+}
+
+.nav-btn {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.7rem;
+  font-size: 0.65rem;
   font-weight: 400;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--muted);
   background: none;
   border: 1px solid var(--rule);
-  border-radius: 0;
-  padding: 0.5rem 1.6rem;
+  border-radius: 2px;
+  padding: 0.5rem 1rem;
   cursor: pointer;
-  margin-bottom: 2rem;
-  transition: color 0.3s ease, border-color 0.3s ease;
-  opacity: 0;
-  animation: fadeIn 1s ease forwards 0.2s;
+  transition: color 0.2s, border-color 0.2s;
 }
 
-.about-btn:hover {
+.nav-btn:hover {
   color: var(--fg);
   border-color: var(--fg);
 }
-
 .container {
   width: min(90vw, 480px);
   opacity: 0;
@@ -185,6 +189,16 @@ body[data-page="list"] {
   transition: width 0.5s ease;
 }
 
+/* ── Pick date ───────────────────────────────────────────── */
+
+.pick-date {
+  text-align: center;
+  font-size: 0.65rem;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  margin-top: 1rem;
+}
+
 /* ── Footer ──────────────────────────────────────────────── */
 
 .footer {
@@ -215,7 +229,7 @@ body[data-page="list"] {
 
 /* ── About overlay ────────────────────────────────────────── */
 
-.about-overlay {
+.overlay {
   position: fixed;
   inset: 0;
   background: var(--overlay-bg);
@@ -228,12 +242,12 @@ body[data-page="list"] {
   justify-content: center;
 }
 
-.about-overlay.open {
+.overlay.open {
   opacity: 1;
   pointer-events: auto;
 }
 
-.about-panel {
+.overlay-panel {
   background: var(--bg);
   max-width: 480px;
   width: 90vw;
@@ -244,12 +258,12 @@ body[data-page="list"] {
   transition: transform 0.4s ease, opacity 0.4s ease;
 }
 
-.about-overlay.open .about-panel {
+.overlay.open .overlay-panel {
   transform: translateY(0);
   opacity: 1;
 }
 
-.about-close {
+.overlay-close {
   position: absolute;
   top: 1rem;
   right: 1.5rem;
@@ -262,11 +276,11 @@ body[data-page="list"] {
   line-height: 1;
 }
 
-.about-close:hover {
+.overlay-close:hover {
   color: var(--fg);
 }
 
-.about-title {
+.overlay-title {
   font-family: 'JetBrains Mono', monospace;
   font-size: 1.1rem;
   font-weight: 500;
@@ -275,33 +289,33 @@ body[data-page="list"] {
   text-transform: uppercase;
 }
 
-.about-text {
+.overlay-text {
   font-size: 0.75rem;
   line-height: 1.8;
   color: var(--fg);
   margin-bottom: 1rem;
 }
 
-.about-list {
+.overlay-list {
   list-style: none;
   padding: 0;
   margin-bottom: 1rem;
 }
 
-.about-list li {
+.overlay-list li {
   font-size: 0.75rem;
   line-height: 1.8;
   color: var(--fg);
   padding: 2px 0;
 }
 
-.about-list li::before {
+.overlay-list li::before {
   content: "\2014";
   margin-right: 8px;
   color: var(--muted);
 }
 
-.about-text.muted {
+.overlay-text.muted {
   color: var(--muted);
   font-style: italic;
 }

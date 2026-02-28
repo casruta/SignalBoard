@@ -5,7 +5,7 @@
       "name": "signalboard",
       "runtimeExecutable": "python",
       "runtimeArgs": ["main.py", "serve"],
-      "port": 8000
+      "port": 9000
     }
   ]
 }
