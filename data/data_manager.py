@@ -17,6 +17,7 @@ from data.alternative_data import (
     fetch_institutional_holders,
     fetch_short_interest_proxy,
 )
+from data.universe_builder import UniverseBuilder, UniverseConfig
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +27,39 @@ class DataManager:
 
     def __init__(self, config: dict | None = None):
         self.config = config or get_config()
-        self._tickers = self.config["universe"]["tickers"]
+        self._tickers = self._resolve_tickers()
         self._lookback = self.config["universe"]["lookback_years"]
         self._fred_key = self.config["fred"]["api_key"]
         self._fmp_key = self.config.get("fmp", {}).get("api_key")
         self._stmt_loader = FinancialStatementLoader(fmp_api_key=self._fmp_key)
+
+    def _resolve_tickers(self) -> list[str]:
+        """Determine ticker universe from config.
+
+        If ``discovery_method`` is ``"curated_smallmid"`` and no explicit
+        tickers are provided, use the :class:`UniverseBuilder` to generate
+        a curated small-mid cap universe.  Otherwise fall back to the
+        static list in ``config["universe"]["tickers"]``.
+        """
+        uni_cfg = self.config.get("universe", {})
+        static_tickers = uni_cfg.get("tickers", [])
+        method = uni_cfg.get("discovery_method", "")
+
+        if method == "curated_smallmid" and not static_tickers:
+            builder_config = UniverseConfig(
+                min_market_cap=uni_cfg.get("min_market_cap", 300_000_000),
+                max_market_cap=uni_cfg.get("max_market_cap", 20_000_000_000),
+                min_daily_volume=uni_cfg.get("min_daily_volume", 100_000),
+            )
+            builder = UniverseBuilder(config=builder_config)
+            tickers = builder.build_universe()
+            logger.info(
+                "UniverseBuilder produced %d tickers (method=%s)",
+                len(tickers), method,
+            )
+            return tickers
+
+        return list(static_tickers)
 
     # ── Prices ──────────────────────────────────────────────────────
 
@@ -44,9 +73,13 @@ class DataManager:
     def get_all_prices(
         self, start: str | None = None, end: str | None = None
     ) -> dict[str, pd.DataFrame]:
-        return fetch_prices_bulk(
-            self._tickers, start=start, end=end, lookback_years=self._lookback
-        )
+        try:
+            return fetch_prices_bulk(
+                self._tickers, start=start, end=end, lookback_years=self._lookback
+            )
+        except Exception as e:
+            logger.error("Bulk price fetch failed: %s", e)
+            return {}
 
     # ── Fundamentals ────────────────────────────────────────────────
 
@@ -54,7 +87,11 @@ class DataManager:
         return fetch_fundamentals(ticker)
 
     def get_all_fundamentals(self) -> pd.DataFrame:
-        return fetch_fundamentals_bulk(self._tickers)
+        try:
+            return fetch_fundamentals_bulk(self._tickers)
+        except Exception as e:
+            logger.error("Bulk fundamentals fetch failed: %s", e)
+            return pd.DataFrame()
 
     # ── Macro ───────────────────────────────────────────────────────
 
@@ -78,7 +115,11 @@ class DataManager:
 
     def get_all_statements(self) -> dict[str, dict]:
         """Return full financial statements for all universe tickers."""
-        return self._stmt_loader.fetch_all_statements_bulk(self._tickers)
+        try:
+            return self._stmt_loader.fetch_all_statements_bulk(self._tickers)
+        except Exception as e:
+            logger.error("Bulk statements fetch failed: %s", e)
+            return {}
 
     # ── Alternative Data ────────────────────────────────────────────
 
@@ -99,7 +140,7 @@ class DataManager:
                     "short_df": fetch_short_interest_proxy(t),
                 }
             except Exception as e:
-                logger.debug("Alt data fetch failed for %s: %s", t, e)
+                logger.warning("Alt data fetch failed for %s: %s", t, e)
                 result[t] = {
                     "insider_df": pd.DataFrame(),
                     "holders_df": pd.DataFrame(),

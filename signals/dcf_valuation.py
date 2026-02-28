@@ -6,14 +6,28 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+SECTOR_TERMINAL_GROWTH = {
+    "Technology": 0.035, "Communication Services": 0.030,
+    "Healthcare": 0.030, "Consumer Discretionary": 0.025,
+    "Industrials": 0.025, "Financial Services": 0.025, "Financials": 0.025,
+    "Consumer Staples": 0.020, "Real Estate": 0.020,
+    "Energy": 0.015, "Materials": 0.020, "Utilities": 0.015,
+}
+
+
+def get_terminal_growth(sector: str, default: float = 0.02) -> float:
+    """Return sector-appropriate terminal growth rate."""
+    return SECTOR_TERMINAL_GROWTH.get(sector, default)
+
 
 def compute_dcf_valuation(
     statements: dict,
     info: dict,
     risk_free_rate: float,
     projection_years: int = 5,
-    terminal_growth: float = 0.02,
+    terminal_growth: float | None = None,
     equity_risk_premium: float = 0.06,
+    improving_fcf: bool = False,
 ) -> dict:
     """Compute DCF intrinsic value and related valuation metrics.
 
@@ -42,7 +56,13 @@ def compute_dcf_valuation(
         "fcf_yield": np.nan,
         "implied_growth_rate": np.nan,
         "ev_to_fcf": np.nan,
+        "ev_to_revenue": np.nan,
     }
+
+    # Sector-dependent terminal growth if not explicitly provided
+    if terminal_growth is None:
+        sector = info.get("sector", "") if info else ""
+        terminal_growth = get_terminal_growth(sector)
 
     market_price = _safe_get(info, "currentPrice")
     shares_outstanding = _safe_get(info, "sharesOutstanding")
@@ -77,6 +97,14 @@ def compute_dcf_valuation(
                         base_fcf if not np.isnan(base_fcf) else 0.0)
         # Still populate what we can
         _populate_non_dcf_metrics(result, base_fcf, market_cap, enterprise_value)
+
+        # EV/Revenue for pre-profit companies
+        quarterly_income = statements.get("quarterly_income")
+        if quarterly_income is not None and not quarterly_income.empty:
+            rev_ttm = _trailing_4q_sum(quarterly_income, "Total Revenue")
+            if not np.isnan(rev_ttm) and rev_ttm > 0 and not np.isnan(enterprise_value):
+                result["ev_to_revenue"] = enterprise_value / rev_ttm
+
         return result
 
     # --- FCF yield and EV/FCF ---
@@ -95,7 +123,8 @@ def compute_dcf_valuation(
         logger.warning("WACC (%.4f) <= terminal growth (%.4f); cannot compute DCF", wacc, terminal_growth)
         return result
 
-    projected = project_fcf(base_fcf, revenue_growth, terminal_growth, projection_years)
+    projected = project_fcf(base_fcf, revenue_growth, terminal_growth, projection_years,
+                            improving_fcf=improving_fcf)
 
     # --- Terminal value ---
     tv = compute_terminal_value(projected[-1], terminal_growth, wacc)
@@ -148,8 +177,9 @@ def compute_wacc(
 
     Cost of equity via CAPM: risk_free + beta * equity_risk_premium.
     Cost of debt: interest_expense / total_debt.
-    Adds +1.5% illiquidity premium for market_cap < $1B.
-    Clamps result to [0.05, 0.25].
+    Adds tiered illiquidity premiums by market cap (2.5% micro, 2% small,
+    1% lower-mid, 0.5% mid-cap).
+    Clamps result to [0.05, 0.30].
     """
     market_cap = _safe_get(info, "marketCap")
     beta = _safe_get(info, "beta", default=1.0)
@@ -202,14 +232,19 @@ def compute_wacc(
 
     wacc = weight_equity * cost_of_equity + weight_debt * cost_of_debt * (1 - tax_rate)
 
-    # Small-cap illiquidity premium
-    if not np.isnan(market_cap) and market_cap < 1_000_000_000:
-        wacc += 0.015
-        logger.info("Applied +1.5%% illiquidity premium for small-cap (market cap: $%.0fM)",
-                     market_cap / 1e6)
+    # Tiered illiquidity premiums by market cap
+    if not np.isnan(market_cap):
+        if market_cap < 500_000_000:
+            wacc += 0.025  # micro-cap
+        elif market_cap < 1_000_000_000:
+            wacc += 0.020  # small-cap
+        elif market_cap < 3_000_000_000:
+            wacc += 0.010  # lower mid-cap
+        elif market_cap < 10_000_000_000:
+            wacc += 0.005  # mid-cap
 
     # Clamp to sane range
-    wacc = float(np.clip(wacc, 0.05, 0.25))
+    wacc = float(np.clip(wacc, 0.05, 0.30))
     return wacc
 
 
@@ -267,17 +302,20 @@ def project_fcf(
     revenue_growth_rate: float,
     terminal_growth: float = 0.02,
     years: int = 5,
+    improving_fcf: bool = False,
 ) -> list[float]:
     """Project FCF forward with growth decaying linearly toward terminal rate.
 
     Year 1 growth = revenue_growth_rate, Year N growth = terminal_growth.
     Intermediate years interpolate linearly. Each year's FCF is capped at
-    2x base_fcf to prevent hockey-stick projections.
+    a multiple of base_fcf (3x if improving_fcf, else 2x) to prevent
+    hockey-stick projections.
     """
     if years < 1:
         return []
 
-    cap = 2.0 * abs(base_fcf)
+    cap_multiplier = 3.0 if improving_fcf else 2.0
+    cap = cap_multiplier * abs(base_fcf)
     projected = []
     current_fcf = base_fcf
 

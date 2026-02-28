@@ -49,6 +49,7 @@ class ScreenedStockRow(Base):
     short_name = Column(String(100))
     sector = Column(String(50))
     industry = Column(String(100))
+    market_cap = Column(Float)
     composite_score = Column(Float)
     rank = Column(Integer)
     # Component scores (0-1 each)
@@ -175,6 +176,7 @@ class Database:
                     short_name=s.get("short_name", ""),
                     sector=s.get("sector", ""),
                     industry=s.get("industry", ""),
+                    market_cap=s.get("market_cap"),
                     composite_score=s.get("composite_score"),
                     rank=s.get("rank"),
                     piotroski_score=s.get("piotroski_score"),
@@ -205,6 +207,7 @@ class Database:
                     "short_name": r.short_name,
                     "sector": r.sector,
                     "industry": r.industry,
+                    "market_cap": r.market_cap,
                     "composite_score": r.composite_score,
                     "rank": r.rank,
                     "piotroski_score": r.piotroski_score,
@@ -235,6 +238,7 @@ class Database:
                 "short_name": row.short_name,
                 "sector": row.sector,
                 "industry": row.industry,
+                "market_cap": row.market_cap,
                 "composite_score": row.composite_score,
                 "rank": row.rank,
                 "piotroski_score": row.piotroski_score,

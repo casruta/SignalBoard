@@ -98,72 +98,84 @@ async def run_daily_pipeline(config: dict | None = None) -> list[dict]:
     # Compute SHAP for all latest predictions
     shap_df = compute_shap_values(model, X_latest)
 
+    failed_tickers = []
     for pred in signals:
         ticker = pred.ticker
         if ticker not in X_latest.index:
             continue
 
-        # Get current price
-        current_price = float(prices[ticker]["Close"].iloc[-1])
-        atr = _get_latest_atr(prices, ticker)
+        try:
+            # Get current price
+            current_price = float(prices[ticker]["Close"].iloc[-1])
+            atr = _get_latest_atr(prices, ticker)
 
-        # Stop/target levels
-        stop_pct = config["strategy"]["stop_loss_pct"] / 100
-        tp_pct = config["strategy"]["take_profit_pct"] / 100
-        trail_pct = config["strategy"]["trailing_stop_trigger_pct"] / 100
+            # Stop/target levels
+            stop_pct = config["strategy"]["stop_loss_pct"] / 100
+            tp_pct = config["strategy"]["take_profit_pct"] / 100
+            trail_pct = config["strategy"]["trailing_stop_trigger_pct"] / 100
 
-        stop_loss = current_price * (1 - stop_pct)
-        take_profit = current_price * (1 + tp_pct)
-        trail_trigger = current_price * (1 + trail_pct)
+            stop_loss = current_price * (1 - stop_pct)
+            take_profit = current_price * (1 + tp_pct)
+            trail_trigger = current_price * (1 + trail_pct)
 
-        # SHAP decomposition
-        categories = decompose_by_category(shap_df, ticker)
-        feature_values = X_latest.loc[ticker].to_dict()
-        fund_dict = fundamentals.loc[ticker].to_dict() if ticker in fundamentals.index else {}
+            # SHAP decomposition
+            categories = decompose_by_category(shap_df, ticker)
+            feature_values = X_latest.loc[ticker].to_dict()
+            fund_dict = fundamentals.loc[ticker].to_dict() if ticker in fundamentals.index else {}
 
-        explanation = build_explanation(categories, feature_values, fund_dict)
-        top_feats = top_contributing_features(shap_df, ticker, n=3)
+            explanation = build_explanation(categories, feature_values, fund_dict)
+            top_feats = top_contributing_features(shap_df, ticker, n=3)
 
-        # Historical context
-        if ticker in X_latest.index:
-            hist = find_similar_signals(
-                feature_matrix,
-                X_latest.loc[ticker],
-                [f for f, _ in top_feats],
-                prices,
-                ticker,
+            # Historical context
+            if ticker in X_latest.index:
+                hist = find_similar_signals(
+                    feature_matrix,
+                    X_latest.loc[ticker],
+                    [f for f, _ in top_feats],
+                    prices,
+                    ticker,
+                )
+            else:
+                hist = {"summary": "No historical data available"}
+
+            # Sector info
+            sector = str(fund_dict.get("sector", "Unknown"))
+            short_name = str(fund_dict.get("short_name", ticker))
+
+            rec = Recommendation(
+                ticker=ticker,
+                action=pred.action,
+                confidence=pred.confidence,
+                predicted_return_5d=pred.probabilities.get("BUY", 0) - pred.probabilities.get("SELL", 0),
+                entry_price=current_price,
+                stop_loss=round(stop_loss, 2),
+                take_profit=round(take_profit, 2),
+                trailing_stop_trigger=round(trail_trigger, 2),
+                time_stop_days=config["strategy"]["time_stop_days"],
+                position_size_pct=0.0,  # Calculated by portfolio constructor
+                sector=sector,
+                short_name=short_name,
+                technical=ExplanationSection(explanation.get("technical", [])),
+                fundamental=ExplanationSection(explanation.get("fundamental", [])),
+                macro=ExplanationSection(explanation.get("macro", [])),
+                ml_insight=MLInsight(
+                    predicted_return=f"{pred.probabilities.get('BUY', 0) - pred.probabilities.get('SELL', 0):+.1%}",
+                    confidence_percentile=f"Top {(1 - pred.confidence) * 100:.0f}%",
+                    top_features=[f for f, _ in top_feats],
+                ),
+                historical_context=[hist.get("summary", "")],
             )
-        else:
-            hist = {"summary": "No historical data available"}
+            recommendations.append(rec.to_dict())
+        except Exception as e:
+            failed_tickers.append(ticker)
+            logger.error("Signal computation failed for %s: %s", ticker, e)
 
-        # Sector info
-        sector = str(fund_dict.get("sector", "Unknown"))
-        short_name = str(fund_dict.get("short_name", ticker))
-
-        rec = Recommendation(
-            ticker=ticker,
-            action=pred.action,
-            confidence=pred.confidence,
-            predicted_return_5d=pred.probabilities.get("BUY", 0) - pred.probabilities.get("SELL", 0),
-            entry_price=current_price,
-            stop_loss=round(stop_loss, 2),
-            take_profit=round(take_profit, 2),
-            trailing_stop_trigger=round(trail_trigger, 2),
-            time_stop_days=config["strategy"]["time_stop_days"],
-            position_size_pct=0.0,  # Calculated by portfolio constructor
-            sector=sector,
-            short_name=short_name,
-            technical=ExplanationSection(explanation.get("technical", [])),
-            fundamental=ExplanationSection(explanation.get("fundamental", [])),
-            macro=ExplanationSection(explanation.get("macro", [])),
-            ml_insight=MLInsight(
-                predicted_return=f"{pred.probabilities.get('BUY', 0) - pred.probabilities.get('SELL', 0):+.1%}",
-                confidence_percentile=f"Top {(1 - pred.confidence) * 100:.0f}%",
-                top_features=[f for f, _ in top_feats],
-            ),
-            historical_context=[hist.get("summary", "")],
-        )
-        recommendations.append(rec.to_dict())
+    succeeded = len(signals) - len(failed_tickers)
+    logger.info(
+        "Signal computation complete: %d/%d tickers succeeded",
+        succeeded,
+        len(signals),
+    )
 
     # ── 4b. Run dynamic screener ─────────────────────────────────
     logger.info("Step 4b: Running dynamic screener...")
@@ -261,7 +273,7 @@ def _run_screener(
 
     macro_regime = "neutral"
     scored_df = screener.compute_composite_scores(
-        deep_fund_map, dcf_map, info_map, macro_regime
+        deep_fund_map, dcf_map, info_map, macro_regime, config=config
     )
     if scored_df.empty:
         return []
@@ -287,6 +299,7 @@ def _run_screener(
             "short_name": info.get("shortName", ticker),
             "sector": info.get("sector", ""),
             "industry": info.get("industry", ""),
+            "market_cap": info.get("marketCap"),
             "composite_score": float(row["composite_score"]),
             "rank": int(row["rank"]),
             "piotroski_score": float(row.get("piotroski_score", 0)),

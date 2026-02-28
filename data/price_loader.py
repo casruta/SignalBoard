@@ -1,10 +1,14 @@
 """Fetch and cache daily OHLCV price data via yfinance."""
 
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
 import yfinance as yf
+
+logger = logging.getLogger(__name__)
 
 CACHE_DIR = Path(__file__).parent / "cache" / "prices"
 
@@ -60,13 +64,25 @@ def fetch_prices_bulk(
     start: str | None = None,
     end: str | None = None,
     lookback_years: int = 10,
+    max_workers: int = 8,
 ) -> dict[str, pd.DataFrame]:
-    """Fetch prices for multiple tickers. Returns {ticker: DataFrame}."""
+    """Fetch prices for multiple tickers in parallel."""
     results = {}
-    for t in tickers:
-        df = fetch_prices(t, start=start, end=end, lookback_years=lookback_years)
-        if not df.empty:
-            results[t] = df
+
+    def _fetch_one(t):
+        return t, fetch_prices(t, start=start, end=end, lookback_years=lookback_years)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_fetch_one, t): t for t in tickers}
+        for future in as_completed(futures):
+            ticker = futures[future]
+            try:
+                t, df = future.result()
+                if not df.empty:
+                    results[t] = df
+            except Exception as e:
+                logger.warning("Price fetch failed for %s: %s", ticker, e)
+
     return results
 
 

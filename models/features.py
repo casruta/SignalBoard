@@ -21,7 +21,8 @@ def add_target(
     -------
     feature_matrix with additional columns:
         - target_return: raw forward return
-        - target_class: -1 (down > 1%), 0 (flat), 1 (up > 1%)
+        - target_class: -1 (down), 0 (flat), 1 (up) using volatility-adjusted thresholds
+        - target_threshold: per-row volatility-adjusted threshold used for classification
     """
     targets = []
     for ticker, group in feature_matrix.groupby(level="ticker"):
@@ -33,8 +34,19 @@ def add_target(
         forward = close_aligned.shift(-horizon_days)
         ret = (forward - close_aligned) / close_aligned
 
+        # Compute rolling 20-day volatility for adaptive thresholds
+        daily_ret = close.pct_change()
+        vol_20 = daily_ret.rolling(20).std()
+        vol_aligned = vol_20.reindex(group.index.get_level_values("date")).values
+
+        classes, thresholds = _classify_adaptive(ret.values, vol_aligned)
+
         ticker_targets = pd.DataFrame(
-            {"target_return": ret.values, "target_class": _classify(ret.values)},
+            {
+                "target_return": ret.values,
+                "target_class": classes,
+                "target_threshold": thresholds,
+            },
             index=group.index,
         )
         targets.append(ticker_targets)
@@ -118,16 +130,24 @@ def add_multi_horizon_targets(
         close = prices[ticker]["Close"]
         close_aligned = close.reindex(group.index.get_level_values("date"))
 
+        # Compute rolling 20-day volatility for adaptive thresholds
+        daily_ret = close.pct_change()
+        vol_20 = daily_ret.rolling(20).std()
+        vol_aligned = vol_20.reindex(group.index.get_level_values("date")).values
+
         ticker_data = {}
         for h in horizons:
             forward = close_aligned.shift(-h)
             ret = (forward - close_aligned) / close_aligned
             ticker_data[f"target_return_{h}d"] = ret.values
-            ticker_data[f"target_class_{h}d"] = _classify(ret.values, threshold=threshold)
+            classes, thresholds = _classify_adaptive(ret.values, vol_aligned)
+            ticker_data[f"target_class_{h}d"] = classes
+            ticker_data[f"target_threshold_{h}d"] = thresholds
 
         # Backward-compatible default columns use the middle horizon
         ticker_data["target_return"] = ticker_data[f"target_return_{middle_horizon}d"]
         ticker_data["target_class"] = ticker_data[f"target_class_{middle_horizon}d"]
+        ticker_data["target_threshold"] = ticker_data[f"target_threshold_{middle_horizon}d"]
 
         ticker_targets = pd.DataFrame(ticker_data, index=group.index)
         all_targets.append(ticker_targets)
@@ -153,10 +173,12 @@ def prepare_train_data(
     df = feature_matrix.dropna(subset=["target_return", "target_class"])
 
     target_cols = ["target_return", "target_class"]
-    non_feature_cols = target_cols + ["ticker"]
+    non_feature_cols = target_cols + ["ticker", "target_threshold"]
     feature_cols = [
         c for c in df.columns
-        if c not in non_feature_cols and df[c].dtype in [np.float64, np.int64, float, int]
+        if c not in non_feature_cols
+        and not c.startswith("target_")
+        and df[c].dtype in [np.float64, np.int64, float, int]
     ]
 
     X = df[feature_cols].copy()
@@ -176,3 +198,37 @@ def _classify(returns: np.ndarray, threshold: float = 0.01) -> np.ndarray:
     result[returns < -threshold] = -1
     result[np.isnan(returns)] = np.nan
     return result
+
+
+def _classify_adaptive(
+    returns: np.ndarray,
+    volatilities: np.ndarray,
+    sigma_threshold: float = 0.8,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Classify returns using volatility-adjusted thresholds.
+
+    threshold_per_stock = sigma_threshold * rolling_volatility
+    Large-cap (1.2% vol) -> ~1.0% threshold
+    Small-cap (2.5% vol) -> ~2.0% threshold
+
+    Parameters
+    ----------
+    returns : forward returns array
+    volatilities : rolling volatility array (same length as returns)
+    sigma_threshold : multiplier for volatility to set threshold
+
+    Returns
+    -------
+    (classes, thresholds) : classification array and per-row threshold used
+    """
+    thresholds = sigma_threshold * np.abs(volatilities)
+    # Fallback to 1% when volatility is NaN or zero
+    thresholds = np.where(
+        np.isnan(thresholds) | (thresholds <= 0), 0.01, thresholds
+    )
+
+    result = np.zeros(len(returns))
+    result[returns > thresholds] = 1
+    result[returns < -thresholds] = -1
+    result[np.isnan(returns)] = np.nan
+    return result, thresholds

@@ -94,6 +94,9 @@
             html += '<div class="row-info">';
             html += '<span class="symbol">' + escapeHtml(s.ticker) + '</span>';
             html += '<span class="name-label">' + escapeHtml(s.short_name || "") + '</span>';
+            if (s.market_cap) {
+                html += '<span class="market-cap-label">' + formatMarketCap(s.market_cap) + '</span>';
+            }
             html += '</div>';
             html += '<span class="score">' + score + '</span>';
             html += '</div>';
@@ -206,6 +209,9 @@
             html += '<div class="detail-header">';
             html += '<div class="ticker">' + escapeHtml(s.ticker) + '</div>';
             html += '<span class="name">' + escapeHtml(s.short_name || "") + '</span>';
+            if (s.market_cap) {
+                html += '<span class="market-cap-label">' + formatMarketCap(s.market_cap) + '</span>';
+            }
             html += '<span class="sector-label">' + escapeHtml(s.sector || "") + '</span>';
             if (s.industry && s.industry !== s.sector) {
                 html += '<span class="sector-label">' + escapeHtml(s.industry) + '</span>';
@@ -411,6 +417,13 @@
     }
 
     // ── Helpers ──────────────────────────────────────────────
+
+    function formatMarketCap(cap) {
+        if (cap == null) return "";
+        if (cap >= 1e9) return "$" + (cap / 1e9).toFixed(1) + "B";
+        if (cap >= 1e6) return "$" + (cap / 1e6).toFixed(0) + "M";
+        return "";
+    }
 
     function escapeHtml(str) {
         var div = document.createElement("div");

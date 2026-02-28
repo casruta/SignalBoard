@@ -11,6 +11,7 @@ and Timestamp columns sorted **descending** (most recent first).
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
@@ -921,4 +922,326 @@ def compute_deep_fundamentals(
     #   compute_industry_relative_metrics(...)
     #   compute_institutional_blindspot(...)
 
+    # ── Additional Small-Mid Cap Features ─────────────────────────────
+    try:
+        features.update(_compute_small_mid_cap_features(qi, qbs, qcf, ai, ab, info))
+    except Exception:
+        logger.warning("Small-mid cap feature computation failed", exc_info=True)
+
+    # ── Data quality score (computed after all features are gathered) ──
+    _DATA_QUALITY_KEYS = [
+        "roe_4q_trend", "roic_latest", "gross_margin_4q_trend",
+        "operating_margin_4q_trend", "net_margin_4q_trend",
+        "altman_z_score", "interest_coverage", "current_ratio",
+        "accruals_ratio", "fcf_to_net_income", "ocf_margin",
+        "earnings_persistence", "piotroski_f_score",
+    ]
+    non_nan_count = sum(
+        1 for k in _DATA_QUALITY_KEYS
+        if k in features and isinstance(features[k], float) and not np.isnan(features[k])
+    )
+    features["data_quality_score"] = non_nan_count / len(_DATA_QUALITY_KEYS)
+
+    # ── Carry-forward logic ───────────────────────────────────────────
+    # For any NaN feature, attempt to carry forward from previous quarter
+    # data (up to 2 quarters). This uses a simple heuristic: store
+    # previous results in a module-level cache keyed by ticker symbol.
+    ticker = info.get("symbol", "") if info else ""
+    if ticker:
+        _apply_carry_forward(ticker, features, max_quarters=2)
+
     return features
+
+
+# ── Module-level cache for carry-forward ──────────────────────────────
+
+_CARRY_FORWARD_CACHE: dict[str, list[dict[str, float]]] = {}
+
+
+def _apply_carry_forward(
+    ticker: str,
+    features: dict[str, float],
+    max_quarters: int = 2,
+) -> None:
+    """For NaN features, carry forward values from previous computations.
+
+    Maintains a rolling history of up to *max_quarters* prior snapshots
+    per ticker. Mutates *features* in place.
+    """
+    history = _CARRY_FORWARD_CACHE.get(ticker, [])
+
+    # Try to fill NaN values from recent history
+    for key, val in features.items():
+        if isinstance(val, float) and np.isnan(val):
+            for prior in history:
+                prior_val = prior.get(key, np.nan)
+                if isinstance(prior_val, float) and not np.isnan(prior_val):
+                    features[key] = prior_val
+                    break
+
+    # Update history: prepend current snapshot, keep at most max_quarters
+    _CARRY_FORWARD_CACHE[ticker] = [features.copy()] + history[:max_quarters - 1]
+
+
+# ── Small-Mid Cap Feature Computation ─────────────────────────────────
+
+
+def _compute_small_mid_cap_features(
+    qi: pd.DataFrame,
+    qbs: pd.DataFrame,
+    qcf: pd.DataFrame,
+    ai: pd.DataFrame,
+    ab: pd.DataFrame,
+    info: dict,
+) -> dict[str, float]:
+    """Compute 12 additional features useful for small-mid cap analysis."""
+    feats: dict[str, float] = {}
+
+    # 1. Insider ownership percentage — skin in the game
+    insider_pct = info.get("heldPercentInsiders") if info else None
+    feats["insider_ownership_pct"] = float(insider_pct) if insider_pct is not None else np.nan
+
+    # 2. Earnings surprise consistency
+    eq_growth = info.get("earningsQuarterlyGrowth") if info else None
+    if eq_growth is not None:
+        feats["earnings_surprise_consistency"] = 1.0 if eq_growth > 0 else 0.0
+    else:
+        feats["earnings_surprise_consistency"] = np.nan
+
+    # 3. Revenue acceleration: compare recent QoQ growth vs prior QoQ growth
+    rev_vals = _series_over_quarters(qi, "Total Revenue", 6)
+    rev_arr = [v for v in rev_vals if not np.isnan(v)]
+    if len(rev_arr) >= 3:
+        # rev_arr[0] = most recent, rev_arr[1] = prior, rev_arr[2] = two ago
+        recent_qoq = (rev_arr[0] - rev_arr[1]) / abs(rev_arr[1]) if rev_arr[1] != 0 else np.nan
+        prior_qoq = (rev_arr[1] - rev_arr[2]) / abs(rev_arr[2]) if rev_arr[2] != 0 else np.nan
+        if not np.isnan(recent_qoq) and not np.isnan(prior_qoq):
+            feats["revenue_acceleration"] = recent_qoq - prior_qoq
+        else:
+            feats["revenue_acceleration"] = np.nan
+    else:
+        feats["revenue_acceleration"] = np.nan
+
+    # 4. DSO red flag: Days Sales Outstanding increase >15 days YoY
+    ar_curr = _safe_line_item(qbs, "Accounts Receivable", 0)
+    rev_curr = _safe_line_item(qi, "Total Revenue", 0)
+    gap = 4 if qbs.shape[1] >= 5 else 0
+    ar_prior = _safe_line_item(qbs, "Accounts Receivable", gap) if gap > 0 else np.nan
+    rev_prior = _safe_line_item(qi, "Total Revenue", gap) if gap > 0 else np.nan
+
+    dso_curr = (ar_curr / rev_curr) * 365 if (
+        not np.isnan(ar_curr) and not np.isnan(rev_curr) and rev_curr != 0
+    ) else np.nan
+    dso_prior = (ar_prior / rev_prior) * 365 if (
+        not np.isnan(ar_prior) and not np.isnan(rev_prior) and rev_prior != 0
+    ) else np.nan
+
+    if not np.isnan(dso_curr) and not np.isnan(dso_prior):
+        dso_change = dso_curr - dso_prior
+        feats["dso_red_flag"] = 1.0 if dso_change > 15 else 0.0
+    else:
+        feats["dso_red_flag"] = np.nan
+
+    # 5. Short squeeze score: shares_short / avg_daily_volume
+    shares_short = info.get("sharesShort") if info else None
+    avg_volume = info.get("averageDailyVolume10Day") or (info.get("averageVolume") if info else None)
+    if shares_short is not None and avg_volume is not None and avg_volume > 0:
+        feats["short_squeeze_score"] = float(shares_short) / float(avg_volume)
+    else:
+        feats["short_squeeze_score"] = np.nan
+
+    # 6. PEG ratio: pe_ratio / (eps_growth * 100)
+    pe_ratio = info.get("trailingPE") if info else None
+    eps_growth = info.get("earningsQuarterlyGrowth") if info else None
+    if pe_ratio is not None and eps_growth is not None and eps_growth != 0:
+        feats["peg_ratio"] = float(pe_ratio) / (float(eps_growth) * 100)
+    else:
+        feats["peg_ratio"] = np.nan
+
+    # 7. EV/Revenue from info dict
+    ev_rev = info.get("enterpriseToRevenue") if info else None
+    feats["ev_to_revenue"] = float(ev_rev) if ev_rev is not None else np.nan
+
+    # 8. Rule of 40: (revenue_growth * 100) + (fcf_margin * 100)
+    rev_ttm = _trailing_sum(qi, "Total Revenue", 4)
+    fcf_ttm = _trailing_sum(qcf, "Free Cash Flow", 4)
+    rev_growth = _yoy_change(qi, "Total Revenue")
+    fcf_margin = _safe_divide(fcf_ttm, rev_ttm)
+    if not np.isnan(rev_growth) and not np.isnan(fcf_margin):
+        feats["rule_of_40"] = (rev_growth * 100) + (fcf_margin * 100)
+    else:
+        feats["rule_of_40"] = np.nan
+
+    # 9. Data quality score: fraction of non-NaN key items
+    _key_items = [
+        "roe_4q_trend", "roic_latest", "gross_margin_4q_trend",
+        "operating_margin_4q_trend", "net_margin_4q_trend",
+        "altman_z_score", "interest_coverage", "current_ratio",
+        "accruals_ratio", "fcf_to_net_income", "ocf_margin",
+        "earnings_persistence", "piotroski_f_score",
+    ]
+    # Note: this runs after categories 1-6 are already in features
+    # so we check those values from the parent dict passed in later;
+    # we'll compute this in the caller instead. For now, placeholder.
+    feats["data_quality_score"] = np.nan  # computed below after merge
+
+    # 10. SBC as pct of revenue
+    sbc = _trailing_sum(qcf, "Stock Based Compensation", 4)
+    feats["sbc_as_pct_revenue"] = _safe_divide(sbc, rev_ttm)
+
+    # 11. Days to earnings
+    earnings_date = info.get("earningsDate") if info else None
+    if earnings_date is not None:
+        try:
+            now = datetime.now(timezone.utc)
+            if isinstance(earnings_date, (list, tuple)):
+                # yfinance sometimes returns a list of timestamps
+                ed = earnings_date[0]
+            else:
+                ed = earnings_date
+            if isinstance(ed, (int, float)):
+                ed = datetime.fromtimestamp(ed, tz=timezone.utc)
+            elif isinstance(ed, str):
+                ed = pd.Timestamp(ed).to_pydatetime().replace(tzinfo=timezone.utc)
+            elif hasattr(ed, 'timestamp'):
+                if ed.tzinfo is None:
+                    ed = ed.replace(tzinfo=timezone.utc)
+            days = (ed - now).days
+            feats["days_to_earnings"] = float(days)
+        except Exception:
+            feats["days_to_earnings"] = np.nan
+    else:
+        feats["days_to_earnings"] = np.nan
+
+    # 12. Continuous Piotroski: weighted 0-100 version of F-Score
+    feats["continuous_piotroski"] = _compute_continuous_piotroski(qi, qcf, qbs, ai, ab)
+
+    return feats
+
+
+def _compute_continuous_piotroski(
+    qi: pd.DataFrame,
+    qcf: pd.DataFrame,
+    qbs: pd.DataFrame,
+    ai: pd.DataFrame,
+    ab: pd.DataFrame,
+) -> float:
+    """Weighted 0-100 Piotroski where each criterion is scored by magnitude.
+
+    Instead of binary 0/1, each of the 9 criteria contributes proportionally
+    based on how strongly the condition is met. Each criterion is worth up to
+    ~11.1 points (100/9), scaled by a sigmoid of the underlying metric.
+    """
+    max_per_criterion = 100.0 / 9.0
+    total = 0.0
+    valid_count = 0
+
+    def _sigmoid_score(value: float, threshold: float = 0.0, scale: float = 10.0) -> float:
+        """Map a value to 0-1 using a sigmoid centered at threshold."""
+        x = (value - threshold) * scale
+        return 1.0 / (1.0 + np.exp(-x))
+
+    # Helper: annual or TTM
+    def _annual_or_ttm(df_ann, df_q, item, year=0):
+        val = _safe_line_item(df_ann, item, year)
+        if not np.isnan(val):
+            return val
+        if year == 0:
+            return _trailing_sum(df_q, item, 4)
+        return np.nan
+
+    def _bs_val(item, year=0):
+        val = _safe_line_item(ab, item, year)
+        if not np.isnan(val):
+            return val
+        return _safe_line_item(qbs, item, year * 4)
+
+    # 1. ROA magnitude
+    ni = _annual_or_ttm(ai, qi, "Net Income", 0)
+    ta = _bs_val("Total Assets", 0)
+    roa = _safe_divide(ni, ta)
+    if not np.isnan(roa):
+        total += max_per_criterion * _sigmoid_score(roa, 0.0, 20.0)
+        valid_count += 1
+
+    # 2. OCF magnitude (relative to assets)
+    ocf = _trailing_sum(qcf, "Operating Cash Flow", 4)
+    ocf_ratio = _safe_divide(ocf, ta)
+    if not np.isnan(ocf_ratio):
+        total += max_per_criterion * _sigmoid_score(ocf_ratio, 0.0, 15.0)
+        valid_count += 1
+
+    # 3. ROA improvement
+    ni_prev = _annual_or_ttm(ai, qi, "Net Income", 1)
+    ta_prev = _bs_val("Total Assets", 1)
+    roa_prev = _safe_divide(ni_prev, ta_prev)
+    if not np.isnan(roa) and not np.isnan(roa_prev):
+        delta_roa = roa - roa_prev
+        total += max_per_criterion * _sigmoid_score(delta_roa, 0.0, 30.0)
+        valid_count += 1
+
+    # 4. Accruals quality: OCF > NI, weighted by magnitude
+    if not np.isnan(ocf) and not np.isnan(ni) and not np.isnan(ta) and ta != 0:
+        accrual = (ocf - ni) / abs(ta)
+        total += max_per_criterion * _sigmoid_score(accrual, 0.0, 15.0)
+        valid_count += 1
+
+    # 5. Leverage decrease
+    ltd_curr = _bs_val("Long Term Debt", 0)
+    ltd_prev = _bs_val("Long Term Debt", 1)
+    ltd_ratio_curr = _safe_divide(ltd_curr, ta)
+    ltd_ratio_prev = _safe_divide(ltd_prev, ta_prev)
+    if not np.isnan(ltd_ratio_curr) and not np.isnan(ltd_ratio_prev):
+        delta_lev = ltd_ratio_prev - ltd_ratio_curr  # positive = improving
+        total += max_per_criterion * _sigmoid_score(delta_lev, 0.0, 20.0)
+        valid_count += 1
+
+    # 6. Current ratio improvement
+    ca_curr = _bs_val("Current Assets", 0)
+    cl_curr = _bs_val("Current Liabilities", 0)
+    ca_prev = _bs_val("Current Assets", 1)
+    cl_prev = _bs_val("Current Liabilities", 1)
+    cr_curr = _safe_divide(ca_curr, cl_curr)
+    cr_prev = _safe_divide(ca_prev, cl_prev)
+    if not np.isnan(cr_curr) and not np.isnan(cr_prev):
+        delta_cr = cr_curr - cr_prev
+        total += max_per_criterion * _sigmoid_score(delta_cr, 0.0, 5.0)
+        valid_count += 1
+
+    # 7. No dilution (share count change)
+    shares_curr = _bs_val("Ordinary Shares Number", 0)
+    if np.isnan(shares_curr):
+        shares_curr = _bs_val("Share Issued", 0)
+    shares_prev = _bs_val("Ordinary Shares Number", 1)
+    if np.isnan(shares_prev):
+        shares_prev = _bs_val("Share Issued", 1)
+    if not np.isnan(shares_curr) and not np.isnan(shares_prev) and shares_prev > 0:
+        dilution = (shares_prev - shares_curr) / shares_prev  # positive = buyback
+        total += max_per_criterion * _sigmoid_score(dilution, 0.0, 50.0)
+        valid_count += 1
+
+    # 8. Gross margin improvement
+    gp_curr = _annual_or_ttm(ai, qi, "Gross Profit", 0)
+    rev_curr = _annual_or_ttm(ai, qi, "Total Revenue", 0)
+    gp_prev = _annual_or_ttm(ai, qi, "Gross Profit", 1)
+    rev_prev = _annual_or_ttm(ai, qi, "Total Revenue", 1)
+    gm_curr = _safe_divide(gp_curr, rev_curr)
+    gm_prev = _safe_divide(gp_prev, rev_prev)
+    if not np.isnan(gm_curr) and not np.isnan(gm_prev):
+        delta_gm = gm_curr - gm_prev
+        total += max_per_criterion * _sigmoid_score(delta_gm, 0.0, 20.0)
+        valid_count += 1
+
+    # 9. Asset turnover improvement
+    at_curr = _safe_divide(rev_curr, ta)
+    at_prev = _safe_divide(rev_prev, ta_prev)
+    if not np.isnan(at_curr) and not np.isnan(at_prev):
+        delta_at = at_curr - at_prev
+        total += max_per_criterion * _sigmoid_score(delta_at, 0.0, 10.0)
+        valid_count += 1
+
+    if valid_count == 0:
+        return np.nan
+
+    # Scale to 0-100 based on available criteria
+    return float(total * 9.0 / valid_count)

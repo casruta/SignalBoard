@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import pandas as pd
@@ -137,18 +138,24 @@ class FinancialStatementLoader:
         return result
 
     def fetch_all_statements_bulk(
-        self, tickers: list[str], force_refresh: bool = False
+        self, tickers: list[str], force_refresh: bool = False, max_workers: int = 8
     ) -> dict[str, dict]:
-        """Bulk fetch for a list of tickers."""
+        """Bulk fetch for a list of tickers in parallel."""
         results: dict[str, dict] = {}
-        for t in tickers:
-            try:
-                results[t.upper()] = self.fetch_all_statements(
-                    t, force_refresh=force_refresh
-                )
-            except Exception:
-                logger.exception("Failed to fetch statements for %s", t)
-                continue
+
+        def _fetch_one(t):
+            return t.upper(), self.fetch_all_statements(t, force_refresh=force_refresh)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {pool.submit(_fetch_one, t): t for t in tickers}
+            for future in as_completed(futures):
+                ticker = futures[future]
+                try:
+                    key, data = future.result()
+                    results[key] = data
+                except Exception:
+                    logger.exception("Failed to fetch statements for %s", ticker)
+
         return results
 
     # ------------------------------------------------------------------
@@ -240,7 +247,7 @@ class FinancialStatementLoader:
         """Return the parquet cache file path for a specific statement."""
         return CACHE_DIR / ticker.upper() / f"{statement_name}.parquet"
 
-    def _is_cache_fresh(self, path: Path, max_age_days: int = 7) -> bool:
+    def _is_cache_fresh(self, path: Path, max_age_days: int = 90) -> bool:
         """Return ``True`` if *path* exists and is less than *max_age_days* old."""
         if not path.exists():
             return False
@@ -276,6 +283,7 @@ class FinancialStatementLoader:
         for key in _STATEMENT_KEYS:
             path = self._cache_path(ticker, key)
             if not self._is_cache_fresh(path):
+                logger.debug("Cache miss for %s/%s", ticker, key)
                 return None
             result[key] = self._load_cache(path)
 
@@ -283,4 +291,5 @@ class FinancialStatementLoader:
         # statements, and the statements are the expensive part.
         result["info"] = {}
         result["source"] = "cache"
+        logger.debug("Cache hit for %s (all statements)", ticker)
         return result

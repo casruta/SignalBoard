@@ -23,14 +23,14 @@ class DynamicScreener:
     to market regime and evaluates stocks holistically.
     """
 
-    # Default component weights (sum to 1.0)
+    # Default component weights (sum to 1.0) — tuned for small-mid cap focus
     DEFAULT_WEIGHTS = {
-        "piotroski": 0.20,
-        "roic_spread": 0.15,
-        "cash_flow_quality": 0.15,
-        "balance_sheet": 0.15,
-        "dcf_upside": 0.15,
-        "blindspot": 0.10,
+        "piotroski": 0.18,
+        "roic_spread": 0.14,
+        "cash_flow_quality": 0.18,    # critical for small caps
+        "balance_sheet": 0.14,
+        "dcf_upside": 0.12,           # less reliable for small caps
+        "blindspot": 0.14,            # key differentiator for under-covered stocks
         "margin_trajectory": 0.10,
     }
 
@@ -62,6 +62,7 @@ class DynamicScreener:
         info_map: dict[str, dict],
         macro_regime: str = "neutral",
         vix_level: float | None = None,
+        config: dict | None = None,
     ) -> list[str]:
         """Screen and rank stocks, return top N tickers.
 
@@ -72,7 +73,7 @@ class DynamicScreener:
         4. Sort by composite score, return top N
         """
         df = self.compute_composite_scores(
-            deep_fundamentals, dcf_results, info_map, macro_regime
+            deep_fundamentals, dcf_results, info_map, macro_regime, config=config
         )
         if df.empty:
             logger.warning("No stocks survived screening.")
@@ -92,6 +93,7 @@ class DynamicScreener:
         dcf_results: dict[str, dict],
         info_map: dict[str, dict],
         macro_regime: str = "neutral",
+        config: dict | None = None,
     ) -> pd.DataFrame:
         """Compute composite quality scores for all stocks.
 
@@ -123,7 +125,7 @@ class DynamicScreener:
         # Safety filter
         scored["passes_safety"] = [
             self._apply_safety_filters(
-                info_map.get(t, {}), deep_fundamentals.get(t, {})
+                info_map.get(t, {}), deep_fundamentals.get(t, {}), config=config
             )
             for t in tickers
         ]
@@ -154,17 +156,24 @@ class DynamicScreener:
 
     # ── Safety Filters ────────────────────────────────────────────────
 
-    def _apply_safety_filters(self, info: dict, deep_fund: dict) -> bool:
+    def _apply_safety_filters(
+        self, info: dict, deep_fund: dict, config: dict | None = None
+    ) -> bool:
         """Hard safety filters that cannot be compensated:
 
         - altman_z_score > 1.81  (not in distress zone)
-        - market_cap > 300_000_000  ($300M minimum)
+        - market_cap between min ($300M) and max ($20B) — configurable
         - At minimum 2 quarters of data available
 
         Returns True if stock passes all filters.
         """
         market_cap = _safe_float(info.get("marketCap"))
-        if np.isnan(market_cap) or market_cap <= 300_000_000:
+        min_cap = 300_000_000
+        max_cap = 20_000_000_000  # $20B default
+        if config:
+            min_cap = config.get("screening", {}).get("min_market_cap", min_cap)
+            max_cap = config.get("screening", {}).get("max_market_cap", max_cap)
+        if np.isnan(market_cap) or market_cap < min_cap or market_cap > max_cap:
             return False
 
         altman_z = _safe_float(deep_fund.get("altman_z_score"))

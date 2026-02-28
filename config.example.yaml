@@ -8,44 +8,18 @@ fmp:
   api_key: ""  # Optional. Financial Modeling Prep fallback. Get free at https://site.financialmodelingprep.com/
 
 universe:
-  # Top S&P 500 stocks by market cap — expand as needed
-  tickers:
-    - AAPL
-    - MSFT
-    - AMZN
-    - NVDA
-    - GOOGL
-    - META
-    - BRK-B
-    - JPM
-    - JNJ
-    - V
-    - UNH
-    - XOM
-    - PG
-    - MA
-    - HD
-    - CVX
-    - MRK
-    - ABBV
-    - PEP
-    - KO
-    - COST
-    - AVGO
-    - LLY
-    - WMT
-    - MCD
-    - CSCO
-    - ACN
-    - TMO
-    - ABT
-    - DHR
+  discovery_method: "curated_smallmid"
+  # empty = use universe builder (see data/universe_builder.py)
+  tickers: []
+  max_market_cap: 20000000000   # $20B
+  min_daily_volume: 100000
   lookback_years: 10
 
 screening:
   enabled: true
   top_n: 50                      # Number of stocks to keep after dynamic screening
   min_market_cap: 300000000      # $300M minimum
+  max_market_cap: 20000000000    # $20B maximum
   min_altman_z: 1.81             # Not in distress zone
 
 strategy:
@@ -64,6 +38,7 @@ strategy:
 
 model:
   target_horizon_days: 10
+  target_threshold: "adaptive"
   train_window_years: 2
   validation_window_months: 3
   retrain_frequency_days: 30
@@ -83,7 +58,10 @@ dcf:
   terminal_growth: 0.02           # 2% terminal growth rate (conservative)
   equity_risk_premium: 0.06       # 6% ERP (conservative)
   projection_years: 5
-  small_cap_premium: 0.015        # +1.5% WACC for market cap < $1B
+  micro_cap_premium: 0.025        # +2.5% WACC for market cap < $300M
+  small_cap_premium: 0.020        # +2.0% WACC for market cap < $2B
+  lower_mid_cap_premium: 0.010    # +1.0% WACC for market cap < $5B
+  mid_cap_premium: 0.005          # +0.5% WACC for market cap < $20B
 
 backtest:
   adaptive_slippage: false         # Use AdaptiveSlippageModel instead of fixed 5bps

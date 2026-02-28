@@ -120,6 +120,13 @@ body[data-page="list"] {
   max-width: 240px;
 }
 
+.market-cap-label {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.75rem;
+  color: #8a8578;
+  letter-spacing: 0.02em;
+}
+
 .score {
   font-family: 'JetBrains Mono', monospace;
   font-size: 1.1rem;
@@ -270,6 +277,25 @@ body[data-page="list"] {
   line-height: 1.7;
   color: var(--fg);
   margin-bottom: 1rem;
+}
+
+.about-list {
+  list-style: none;
+  padding: 0;
+  margin-bottom: 1rem;
+}
+
+.about-list li {
+  font-size: 0.85rem;
+  line-height: 1.7;
+  color: var(--fg);
+  padding: 2px 0;
+}
+
+.about-list li::before {
+  content: "\2014";
+  margin-right: 8px;
+  color: var(--muted);
 }
 
 .about-text.muted {

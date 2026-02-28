@@ -374,7 +374,7 @@ def cmd_screen(config: dict):
     # Run screener
     screener = DynamicScreener(top_n=config.get("screening", {}).get("top_n", 50))
     scores_df = screener.compute_composite_scores(
-        deep_fund_map, dcf_map, info_map, macro_regime
+        deep_fund_map, dcf_map, info_map, macro_regime, config=config
     )
 
     logger.info("\n=== Top Stocks by Composite Quality Score ===")

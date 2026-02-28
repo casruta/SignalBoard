@@ -4,13 +4,29 @@ import numpy as np
 import pandas as pd
 
 
+def _assign_cap_tier(market_cap: pd.Series) -> pd.Series:
+    """Assign market-cap tier labels based on dollar value.
+
+    <2B  = 'small'
+    2B-10B = 'mid'
+    >10B = 'large'
+    """
+    tiers = pd.Series("large", index=market_cap.index)
+    tiers[market_cap < 2e9] = "small"
+    tiers[(market_cap >= 2e9) & (market_cap < 10e9)] = "mid"
+    tiers[market_cap.isna()] = np.nan
+    return tiers
+
+
 def compute_cross_sectional_features(
     feature_matrix: pd.DataFrame,
 ) -> pd.DataFrame:
     """Compute cross-sectional (relative) features for each date.
 
-    For each date, ranks each ticker's signals against the full universe
-    so the model sees *relative* strength, not just absolute values.
+    If ``fund_market_cap`` is present, rankings are computed within
+    market-cap tiers (small / mid / large) so that a 2% return is
+    evaluated against peers of similar size. Falls back to full-
+    universe ranking when market cap data is unavailable.
 
     Parameters
     ----------
@@ -23,6 +39,14 @@ def compute_cross_sectional_features(
     df = feature_matrix.copy()
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 
+    # Determine grouping keys: cap-tier-aware or full universe
+    has_cap = "fund_market_cap" in df.columns
+    if has_cap:
+        df["cap_tier"] = _assign_cap_tier(df["fund_market_cap"])
+        rank_group = [df.index.get_level_values("date"), df["cap_tier"]]
+    else:
+        rank_group = "date"  # groupby level name
+
     # Key signals to rank cross-sectionally
     rank_signals = [
         "momentum_5", "momentum_10", "momentum_20",
@@ -32,8 +56,14 @@ def compute_cross_sectional_features(
     rank_signals = [s for s in rank_signals if s in numeric_cols]
 
     for signal in rank_signals:
-        # Percentile rank within each date (0 = weakest, 1 = strongest)
-        df[f"xs_rank_{signal}"] = df.groupby(level="date")[signal].rank(pct=True)
+        if has_cap:
+            # Rank within [date, cap_tier]
+            df[f"xs_rank_{signal}"] = df.groupby(rank_group)[signal].rank(pct=True)
+            # Also keep full-universe rank as fallback / complementary feature
+            df[f"xs_rank_{signal}_univ"] = df.groupby(level="date")[signal].rank(pct=True)
+        else:
+            # Percentile rank within each date (0 = weakest, 1 = strongest)
+            df[f"xs_rank_{signal}"] = df.groupby(level="date")[signal].rank(pct=True)
 
     # Sector-relative momentum (if sector info available)
     if "fund_sector" in df.columns and "momentum_5" in df.columns:
@@ -52,7 +82,11 @@ def compute_cross_sectional_features(
 
     # Dispersion features (market-wide breadth)
     if "momentum_5" in numeric_cols:
-        # Cross-sectional volatility of momentum = market dispersion
+        if has_cap:
+            # Per-tier dispersion
+            disp_tier = df.groupby(rank_group)["momentum_5"].transform("std")
+            df["xs_momentum_dispersion_tier"] = disp_tier
+        # Full-universe dispersion (always useful)
         disp = df.groupby(level="date")["momentum_5"].transform("std")
         df["xs_momentum_dispersion"] = disp
 

@@ -8,414 +8,427 @@ from server.database import Database
 logger = logging.getLogger(__name__)
 
 MOCK_SIGNALS = [
+    # ── BUY Signals (8) — Small-Mid Cap Focus ────────────────────────
     {
-        "ticker": "AAPL",
-        "short_name": "Apple Inc.",
-        "sector": "Technology",
+        "ticker": "CEIX",
+        "short_name": "CONSOL Energy",
+        "sector": "Energy",
         "action": "BUY",
-        "confidence": 0.92,
-        "predicted_return_5d": 0.034,
-        "entry_price": 227.50,
-        "stop_loss": 220.50,
-        "take_profit": 239.00,
+        "confidence": 0.91,
+        "predicted_return_5d": 0.038,
+        "entry_price": 102.50,
+        "stop_loss": 96.00,
+        "take_profit": 112.00,
         "technical": {
             "points": [
-                "RSI at 42 rebounding from oversold territory",
-                "MACD histogram turning positive after bearish crossover",
-                "Price holding above 200-day moving average at $218",
-                "Bollinger Bands squeezing — breakout imminent",
+                "RSI at 39 rebounding off oversold with bullish divergence",
+                "Volume accumulation pattern over last 10 sessions",
+                "Price reclaiming 20-day MA after pullback to support at $96",
             ]
         },
         "fundamental": {
             "points": [
-                "Services revenue grew 14% YoY, now 26% of total revenue",
-                "Gross margin expanded to 46.6%, highest in a decade",
-                "iPhone 16 cycle showing stronger-than-expected ASP uplift",
+                "Piotroski F-Score 8/9 — top-decile financial strength",
+                "FCF yield 15% on $4B market cap, deeply undervalued vs peers",
+                "Trading at 0.5x book value with ROIC 28% vs 10% WACC",
+                "Only 5 analysts covering — classic blindspot for under-covered stock",
             ]
         },
         "macro": {
             "points": [
-                "Fed signaling rate cuts support growth-stock valuations",
-                "Consumer spending resilient despite inflation concerns",
+                "Thermal coal export pricing resilient on Asian demand",
+                "Energy security concerns keeping domestic production favored",
             ]
         },
-        "ml_insight": "Ensemble model shows 89% probability of positive 5-day return. Feature importance dominated by momentum reversal signals and options flow imbalance.",
-        "risk_context": "Max drawdown risk estimated at 3.1%. Position sized at 8% of portfolio given sector concentration limits. VIX at 16 suggests low implied vol environment.",
-        "historical_context": "Similar setups in AAPL (RSI bounce + MACD turn) have produced 3.2% median 5-day return over the past 3 years (n=14, win rate 78%).",
+        "ml_insight": "Ensemble model 89% BUY probability. Dominant features: extreme FCF yield, Piotroski score, and low analyst coverage blindspot signal.",
+        "risk_context": "$4B market cap small-mid cap energy name. Commodity price sensitivity is primary risk. Position at 5% given sector vol. Coal transition risk is long-term overhang.",
+        "historical_context": "CEIX at sub-0.6x book with Piotroski 8+ has rallied 4.2% median over 5 days in last 2 years (n=6, win rate 83%).",
     },
     {
-        "ticker": "NVDA",
-        "short_name": "NVIDIA Corp.",
+        "ticker": "CALX",
+        "short_name": "Calix Inc.",
         "sector": "Technology",
         "action": "BUY",
-        "confidence": 0.89,
-        "predicted_return_5d": 0.042,
-        "entry_price": 875.00,
-        "stop_loss": 845.00,
-        "take_profit": 920.00,
+        "confidence": 0.86,
+        "predicted_return_5d": 0.032,
+        "entry_price": 38.50,
+        "stop_loss": 35.50,
+        "take_profit": 42.00,
         "technical": {
             "points": [
-                "Breakout above consolidation range with volume confirmation",
-                "RSI at 58, room to run before overbought",
-                "20-day MA crossed above 50-day MA (golden cross on daily)",
+                "Double bottom pattern at $35 support confirmed",
+                "MACD crossing above signal line with histogram expanding",
+                "Bollinger Band squeeze resolving to the upside",
             ]
         },
         "fundamental": {
             "points": [
-                "Data center revenue up 409% YoY, AI demand accelerating",
-                "Blackwell GPU ramp ahead of schedule per management",
-                "Gross margins stable at 75% despite supply scaling",
+                "Revenue growth 20% YoY driven by broadband infrastructure buildout",
+                "Gross margins expanding from 52% to 56% on software mix shift",
+                "Piotroski F-Score 7/9, DCF upside 35% at $3B market cap",
+                "Only 7 analysts covering — institutional ownership still building",
             ]
         },
         "macro": {
             "points": [
-                "Global AI capex forecasts revised up 30% for 2026",
-                "Semiconductor cycle entering expansion phase per SIA data",
+                "Federal broadband subsidies ($42B BEAD program) accelerating rural deployments",
+                "Fiber-to-the-home penetration still below 40% in US",
             ]
         },
-        "ml_insight": "Model assigns 86% BUY probability. Key drivers: earnings momentum z-score (+2.4), sector relative strength, and institutional accumulation signal.",
-        "risk_context": "High beta (1.8) stock — position capped at 6% of portfolio. Implied vol elevated at 52% annualized. Earnings in 3 weeks adds event risk.",
-        "historical_context": "Post-consolidation breakouts in NVDA with volume have returned 4.8% median over 5 days in last 2 years (n=9, win rate 67%).",
+        "ml_insight": "Model assigns 84% BUY probability. Key drivers: revenue acceleration, margin expansion, and undiscovered value signal from low coverage.",
+        "risk_context": "$3B market cap tech name. Government funding timeline risk. Position at 5%. Beta 1.3. Earnings in 4 weeks adds event risk.",
+        "historical_context": "CALX double bottoms with expanding margins have produced 3.5% median 5-day return (n=5, win rate 80%).",
     },
     {
-        "ticker": "JPM",
-        "short_name": "JPMorgan Chase",
+        "ticker": "BOOT",
+        "short_name": "Boot Barn Holdings",
+        "sector": "Consumer Discretionary",
+        "action": "BUY",
+        "confidence": 0.88,
+        "predicted_return_5d": 0.029,
+        "entry_price": 148.00,
+        "stop_loss": 140.00,
+        "take_profit": 160.00,
+        "technical": {
+            "points": [
+                "Breakout above 50-day MA on 2x average volume",
+                "RSI at 56 with room to run before overbought",
+                "Price clearing descending trendline resistance from Q4 highs",
+            ]
+        },
+        "fundamental": {
+            "points": [
+                "Same-store sales growth 15% — best in specialty retail",
+                "Insider cluster buying: CEO and CFO purchased $2.1M in last 30 days",
+                "ROIC 24% vs 9% WACC on $4B market cap, Piotroski 7/9",
+                "Store count growth 10% YoY with 3-year payback per unit",
+            ]
+        },
+        "macro": {
+            "points": [
+                "Western and work-wear categories outperforming broader retail",
+                "Rural consumer spending resilient relative to urban discretionary",
+            ]
+        },
+        "ml_insight": "88% BUY signal. Insider cluster buying combined with volume breakout is the top-weighted feature. Quality momentum interaction triggered.",
+        "risk_context": "$4B market cap retail stock. Consumer spending slowdown is key risk. Insider buying provides downside floor. Position at 6%.",
+        "historical_context": "BOOT breakouts with concurrent insider buying have returned 3.1% median over 5 days (n=7, win rate 86%).",
+    },
+    {
+        "ticker": "HIMS",
+        "short_name": "Hims & Hers Health",
+        "sector": "Healthcare",
+        "action": "BUY",
+        "confidence": 0.84,
+        "predicted_return_5d": 0.041,
+        "entry_price": 52.00,
+        "stop_loss": 47.50,
+        "take_profit": 58.00,
+        "technical": {
+            "points": [
+                "Bull flag consolidation after 30% earnings gap-up",
+                "RSI cooling from 72 to 58 — healthy pullback",
+                "Volume profile shows strong support at $50 level",
+            ]
+        },
+        "fundamental": {
+            "points": [
+                "Revenue growth 40% YoY, subscriber base crossing 2M",
+                "Approaching GAAP profitability — operating leverage inflecting",
+                "DCF upside 28% on $6B market cap with conservative 25% growth assumption",
+                "Only 9 analysts covering despite accelerating fundamentals",
+            ]
+        },
+        "macro": {
+            "points": [
+                "Telehealth adoption permanently elevated post-pandemic",
+                "GLP-1 compounding opportunity adds TAM expansion optionality",
+            ]
+        },
+        "ml_insight": "84% BUY probability. Revenue acceleration + approaching profitability inflection are dominant features. Undiscovered value signal active.",
+        "risk_context": "$6B market cap healthcare disruptor. Regulatory risk around compounding pharmacy rules. High beta (1.9). Position at 4% given volatility.",
+        "historical_context": "HIMS bull flags post-earnings have resolved upward with 4.5% median 5-day return (n=4, win rate 75%).",
+    },
+    {
+        "ticker": "ITT",
+        "short_name": "ITT Inc.",
+        "sector": "Industrials",
+        "action": "BUY",
+        "confidence": 0.87,
+        "predicted_return_5d": 0.022,
+        "entry_price": 152.00,
+        "stop_loss": 146.00,
+        "take_profit": 161.00,
+        "technical": {
+            "points": [
+                "Ascending triangle breakout with volume confirmation",
+                "On-balance volume hitting new highs ahead of price",
+                "All major moving averages aligned bullishly (10>20>50>200)",
+            ]
+        },
+        "fundamental": {
+            "points": [
+                "ROIC 22% vs 8% WACC — exceptional value creation at $12B cap",
+                "30 consecutive years of dividend increases, payout ratio only 18%",
+                "Piotroski F-Score 8/9, FCF conversion rate above 110%",
+                "Organic growth 7% with margin expansion in motion technology segment",
+            ]
+        },
+        "macro": {
+            "points": [
+                "Industrial reshoring driving domestic capex in precision components",
+                "Aerospace aftermarket demand robust with aging fleet dynamics",
+            ]
+        },
+        "ml_insight": "87% BUY probability. Quality compounding signal: high ROIC spread + dividend consistency + Piotroski strength. Classic quality-momentum setup.",
+        "risk_context": "$12B market cap precision manufacturer. Cyclical industrial exposure. Low beta (0.9). Position at 6%. Recession risk is primary concern.",
+        "historical_context": "ITT ascending triangle breakouts with OBV confirmation have yielded 2.4% median 5-day return (n=8, win rate 75%).",
+    },
+    {
+        "ticker": "STEP",
+        "short_name": "StepStone Group",
         "sector": "Financials",
         "action": "BUY",
         "confidence": 0.85,
-        "predicted_return_5d": 0.021,
-        "entry_price": 198.00,
-        "stop_loss": 192.00,
-        "take_profit": 207.00,
+        "predicted_return_5d": 0.027,
+        "entry_price": 58.00,
+        "stop_loss": 54.00,
+        "take_profit": 63.00,
         "technical": {
             "points": [
-                "Price reclaiming 50-day MA after pullback",
-                "On-balance volume divergence suggests accumulation",
-                "Support confirmed at $192 level (tested 3 times)",
+                "Cup and handle forming on weekly with handle near completion",
+                "RSI at 52 with bullish momentum divergence",
+                "Volume drying up on handle pullback — classic accumulation",
             ]
         },
         "fundamental": {
             "points": [
-                "Net interest income guidance raised by $2B for FY2026",
-                "Credit quality remains strong — NCO ratio at 0.6%",
-                "Buyback program accelerated, $4B remaining in authorization",
+                "AUM growing 25% YoY to $170B, fee-related earnings accelerating",
+                "Insider ownership 35% — management heavily aligned at $7B cap",
+                "ROIC 19% with asset-light model, Piotroski 7/9",
+                "Only 6 analysts covering — significantly under-followed vs peers",
             ]
         },
         "macro": {
             "points": [
-                "Yield curve normalizing — positive for bank net interest margins",
-                "Loan growth picking up as corporate confidence improves",
+                "Institutional allocation to alternatives still increasing globally",
+                "Private credit and infrastructure fundraising at record levels",
             ]
         },
-        "ml_insight": "Model confidence 82%. Financials sector rotation signal triggered. Interest rate sensitivity feature contributing most to the BUY call.",
-        "risk_context": "Moderate risk profile. Beta of 1.1. Position sized at 7% given diversified financials exposure. Downside scenario: unexpected credit deterioration.",
-        "historical_context": "JPM bouncing off 50-day MA with positive OBV divergence has yielded 2.3% median 5-day return (n=11, win rate 73%).",
+        "ml_insight": "85% BUY probability. High insider ownership + low analyst coverage + AUM growth create strong undiscovered value signal.",
+        "risk_context": "$7B market cap alt asset manager. Fundraising cycle risk and market-sensitive carry revenue. Position at 5%. Liquidity adequate.",
+        "historical_context": "STEP cup-and-handle completions have produced 2.9% median 5-day return (n=5, win rate 80%).",
     },
     {
-        "ticker": "LLY",
-        "short_name": "Eli Lilly",
+        "ticker": "GKOS",
+        "short_name": "Glaukos Corp.",
         "sector": "Healthcare",
         "action": "BUY",
-        "confidence": 0.87,
-        "predicted_return_5d": 0.028,
-        "entry_price": 785.00,
-        "stop_loss": 760.00,
-        "take_profit": 820.00,
-        "technical": {
-            "points": [
-                "Cup and handle pattern completing on weekly chart",
-                "RSI divergence — price flat while RSI rising",
-                "Volume dry-up on pullback suggests selling exhaustion",
-            ]
-        },
-        "fundamental": {
-            "points": [
-                "Mounjaro/Zepbound revenue trajectory exceeding Street estimates",
-                "Pipeline readouts in Q1 for Alzheimer's and oncology",
-                "Earnings growth rate of 40%+ for next 3 years",
-            ]
-        },
-        "macro": {
-            "points": [
-                "GLP-1 market size estimates revised up to $150B by 2030",
-                "Healthcare sector defensive in uncertain macro environment",
-            ]
-        },
-        "ml_insight": "Strong BUY signal (87%). Pharma momentum factor and earnings revision breadth are the top contributing features.",
-        "risk_context": "Single-product concentration risk (GLP-1 class). Position at 5% given healthcare sector cap. Binary event risk from pipeline data.",
-        "historical_context": "Cup-and-handle completions in large-cap pharma have 3.1% median 5-day return (n=8, win rate 75%).",
-    },
-    {
-        "ticker": "XOM",
-        "short_name": "Exxon Mobil",
-        "sector": "Energy",
-        "action": "SELL",
-        "confidence": 0.81,
-        "predicted_return_5d": -0.019,
-        "entry_price": 112.00,
-        "stop_loss": 116.50,
-        "take_profit": 106.00,
-        "technical": {
-            "points": [
-                "Bearish engulfing candle on weekly chart",
-                "RSI at 68 with bearish divergence forming",
-                "Price rejected at resistance zone $113-114 twice",
-            ]
-        },
-        "fundamental": {
-            "points": [
-                "Refining margins compressing as global capacity comes online",
-                "Capex guidance raised 12% — potential drag on FCF",
-                "Pioneer integration costs weighing on near-term EPS",
-            ]
-        },
-        "macro": {
-            "points": [
-                "Oil demand growth forecasts trimmed by IEA for 2026",
-                "OPEC+ compliance weakening, supply overhang risk",
-            ]
-        },
-        "ml_insight": "Model assigns 78% probability of negative 5-day return. Energy sector momentum turning negative. Mean reversion signal triggered.",
-        "risk_context": "Short position risk: energy stocks can gap on geopolitical events. Stop loss tight at 4%. Position sized at 5%.",
-        "historical_context": "Bearish engulfing at resistance in XOM has preceded -2.1% median 5-day return (n=7, win rate 71%).",
-    },
-    {
-        "ticker": "AMZN",
-        "short_name": "Amazon.com",
-        "sector": "Consumer Discretionary",
-        "action": "BUY",
         "confidence": 0.83,
-        "predicted_return_5d": 0.025,
-        "entry_price": 192.00,
-        "stop_loss": 185.00,
-        "take_profit": 202.00,
+        "predicted_return_5d": 0.035,
+        "entry_price": 118.00,
+        "stop_loss": 110.00,
+        "take_profit": 130.00,
         "technical": {
             "points": [
-                "Ascending triangle forming with base at $188",
-                "Volume increasing on up days, decreasing on down days",
-                "MACD about to cross signal line from below",
+                "Inverse head and shoulders forming with neckline at $120",
+                "RSI at 48 recovering from oversold territory",
+                "Volume expanding on up days for 3 consecutive weeks",
             ]
         },
         "fundamental": {
             "points": [
-                "AWS revenue reaccelerating to 19% growth",
-                "Operating margins expanding as cost discipline continues",
-                "Advertising business now $14B/quarter run rate",
+                "Disruptive iDose TR glaucoma device gaining rapid share",
+                "Gross margins 90% — best-in-class for med-tech at $5B cap",
+                "Revenue growth 18% with expanding surgeon adoption curve",
+                "DCF upside 42% — Street underestimates iDose TAM expansion",
             ]
         },
         "macro": {
             "points": [
-                "E-commerce penetration still growing post-normalization",
-                "Cloud spending budgets increasing across enterprise surveys",
+                "Aging population driving glaucoma prevalence higher globally",
+                "Med-tech M&A multiples expanding as large-caps seek growth",
             ]
         },
-        "ml_insight": "BUY probability 80%. AWS reacceleration signal and consumer discretionary sector rotation are key model drivers.",
-        "risk_context": "Large cap with moderate vol. Beta 1.2. Position at 7%. Risk is cloud growth deceleration surprise.",
-        "historical_context": "AMZN ascending triangle breakouts have 2.8% median 5-day return (n=6, win rate 67%).",
+        "ml_insight": "83% BUY probability. High DCF upside + low analyst coverage (8 analysts) triggers undiscovered value interaction. Margin quality score in top decile.",
+        "risk_context": "$5B market cap med-tech. Single-product concentration risk around iDose. FDA regulatory risk. Position at 4%. Binary outcomes possible.",
+        "historical_context": "GKOS inverse H&S patterns with expanding volume have returned 3.8% median over 5 days (n=4, win rate 75%).",
     },
     {
-        "ticker": "PG",
-        "short_name": "Procter & Gamble",
-        "sector": "Consumer Staples",
-        "action": "SELL",
-        "confidence": 0.77,
-        "predicted_return_5d": -0.015,
-        "entry_price": 168.00,
-        "stop_loss": 172.00,
-        "take_profit": 162.00,
-        "technical": {
-            "points": [
-                "Death cross: 50-day MA crossed below 200-day MA",
-                "Price below both key moving averages",
-                "Declining volume on rally attempts",
-            ]
-        },
-        "fundamental": {
-            "points": [
-                "Volume growth turning negative in key categories",
-                "Private label share gains pressuring pricing power",
-                "Input cost inflation reaccelerating (palm oil, packaging)",
-            ]
-        },
-        "macro": {
-            "points": [
-                "Consumer trade-down trend accelerating in staples",
-                "Sector rotation away from defensives into cyclicals",
-            ]
-        },
-        "ml_insight": "SELL probability 74%. Defensive sector underperformance signal and negative earnings revision momentum are primary features.",
-        "risk_context": "Low-beta (0.5) defensive name — short squeeze risk is low. Position at 4%. Safe-haven flows could provide temporary support.",
-        "historical_context": "Death crosses in PG have been followed by -1.8% median 5-day return (n=5, win rate 60%).",
-    },
-    {
-        "ticker": "META",
-        "short_name": "Meta Platforms",
-        "sector": "Communication Services",
+        "ticker": "STLD",
+        "short_name": "Steel Dynamics",
+        "sector": "Materials",
         "action": "BUY",
         "confidence": 0.86,
-        "predicted_return_5d": 0.031,
-        "entry_price": 580.00,
-        "stop_loss": 560.00,
-        "take_profit": 610.00,
-        "technical": {
-            "points": [
-                "Flag pattern forming after strong earnings gap up",
-                "RSI cooling to 55 from overbought — healthy reset",
-                "Support at $570 from prior resistance turned support",
-            ]
-        },
-        "fundamental": {
-            "points": [
-                "Reels monetization efficiency improving rapidly",
-                "AI-driven ad targeting boosting ROAS metrics",
-                "Reality Labs losses narrowing ahead of schedule",
-            ]
-        },
-        "macro": {
-            "points": [
-                "Digital ad spend growing 12% YoY globally",
-                "Strong engagement trends across Instagram and WhatsApp",
-            ]
-        },
-        "ml_insight": "86% BUY probability. Post-earnings momentum signal and digital advertising growth factor are top contributors.",
-        "risk_context": "Position at 6%. Regulatory overhang (EU DMA compliance) is a tail risk. High capex guidance could pressure sentiment.",
-        "historical_context": "META flag patterns post-earnings have resolved upward 80% of the time with 3.4% median 5-day gain (n=10).",
-    },
-    {
-        "ticker": "MRK",
-        "short_name": "Merck & Co.",
-        "sector": "Healthcare",
-        "action": "SELL",
-        "confidence": 0.79,
-        "predicted_return_5d": -0.022,
-        "entry_price": 125.00,
+        "predicted_return_5d": 0.024,
+        "entry_price": 135.00,
         "stop_loss": 129.00,
-        "take_profit": 119.00,
+        "take_profit": 144.00,
         "technical": {
             "points": [
-                "Head and shoulders pattern completing on daily chart",
-                "Neckline break at $126 with volume confirmation",
-                "All major moving averages sloping downward",
+                "Price bouncing off 200-day MA with hammer reversal candle",
+                "MACD histogram turning positive after extended bearish run",
+                "Relative strength vs XLB improving for 2 consecutive weeks",
             ]
         },
         "fundamental": {
             "points": [
-                "Keytruda patent cliff approaching (2028) weighing on valuation",
-                "Pipeline diversification efforts behind peers",
-                "Recent acquisition integration adding $800M in costs",
+                "Lowest-cost US steel producer, FCF yield 9% on $18B market cap",
+                "Piotroski F-Score 8/9, buyback retiring 5% of shares annually",
+                "ROIC 18% vs 9% WACC through full cycle, balance sheet net cash",
+                "New aluminum flat-roll mill adds diversification and growth runway",
             ]
         },
         "macro": {
             "points": [
-                "Drug pricing reform pressure on pharma margins",
-                "Sector rotation favoring growth over value healthcare",
+                "Infrastructure spending and reshoring driving domestic steel demand",
+                "Section 232 tariffs maintaining pricing floor for US producers",
             ]
         },
-        "ml_insight": "SELL probability 76%. Patent cliff risk factor and negative technical momentum are the dominant model inputs.",
-        "risk_context": "Defensive pharma name — position at 4%. Risk of snap-back if pipeline data surprises positively.",
-        "historical_context": "H&S completions in large-cap pharma have -2.5% median 5-day return (n=6, win rate 67%).",
+        "ml_insight": "86% BUY probability. FCF machine signal + Piotroski quality + buyback yield create strong composite. Quality momentum interaction active.",
+        "risk_context": "$18B market cap steel producer at upper end of small-mid cap range. Commodity cyclicality risk. Beta 1.2. Position at 5%.",
+        "historical_context": "STLD bounces off 200-day MA with Piotroski 8+ have yielded 2.6% median 5-day return (n=9, win rate 78%).",
+    },
+    # ── SELL Signals (4) — Small-Mid Cap Deteriorating Names ─────────
+    {
+        "ticker": "RUN",
+        "short_name": "Sunrun Inc.",
+        "sector": "Utilities",
+        "action": "SELL",
+        "confidence": 0.82,
+        "predicted_return_5d": -0.028,
+        "entry_price": 12.50,
+        "stop_loss": 14.00,
+        "take_profit": 10.50,
+        "technical": {
+            "points": [
+                "Descending channel intact, price rejected at upper channel line",
+                "RSI at 44 with no oversold bounce momentum",
+                "Death cross: 50-day MA below 200-day MA, gap widening",
+            ]
+        },
+        "fundamental": {
+            "points": [
+                "Unit economics deteriorating as customer acquisition costs rise 22%",
+                "Piotroski F-Score 3/9 — financial health in bottom quartile",
+                "FCF negative with $6.5B in net debt on $3B market cap",
+                "Subscriber churn ticking up as NEM 3.0 reduces rooftop solar economics",
+            ]
+        },
+        "macro": {
+            "points": [
+                "Higher interest rates directly impair solar lease financing model",
+                "IRA subsidy uncertainty adding policy risk to residential solar",
+            ]
+        },
+        "ml_insight": "SELL probability 80%. Negative FCF + weak Piotroski + rising rates interaction dominate the model. Deterioration trend signal triggered.",
+        "risk_context": "$3B market cap solar name. Heavily shorted (18% SI). Short squeeze risk is real — stop tight at 12%. Position at 3%.",
+        "historical_context": "RUN in descending channels with Piotroski below 4 has declined -3.1% median over 5 days (n=6, win rate 67%).",
     },
     {
-        "ticker": "BA",
-        "short_name": "Boeing Co.",
+        "ticker": "BYND",
+        "short_name": "Beyond Meat",
+        "sector": "Consumer Staples",
+        "action": "SELL",
+        "confidence": 0.88,
+        "predicted_return_5d": -0.035,
+        "entry_price": 5.80,
+        "stop_loss": 6.50,
+        "take_profit": 4.80,
+        "technical": {
+            "points": [
+                "Price in persistent downtrend below all major moving averages",
+                "Each rally attempt fails at lower levels — textbook distribution",
+                "Volume spiking on down days with no buying interest on bounces",
+            ]
+        },
+        "fundamental": {
+            "points": [
+                "Revenue declining 18% YoY — consumer rejection of plant-based premium",
+                "Cash burn $50M/quarter with only $150M remaining, dilution imminent",
+                "Piotroski F-Score 2/9 — near-distress financial profile",
+                "Management turnover: 3rd CFO in 2 years, no insider buying at $500M cap",
+            ]
+        },
+        "macro": {
+            "points": [
+                "Plant-based meat category shrinking as novelty fades",
+                "Consumer trade-down favoring value protein over premium alternatives",
+            ]
+        },
+        "ml_insight": "Strong SELL at 88%. Cash burn acceleration + Piotroski distress score + management instability form a toxic combination. Model sees continued erosion.",
+        "risk_context": "$500M micro-cap. Extremely high volatility. Potential acquisition target creates upside tail risk. Position at 2% max. Tight stop at 12%.",
+        "historical_context": "BYND in persistent downtrend with Piotroski 2 has seen -3.8% median 5-day return (n=8, win rate 75%).",
+    },
+    {
+        "ticker": "LCID",
+        "short_name": "Lucid Group",
+        "sector": "Consumer Discretionary",
+        "action": "SELL",
+        "confidence": 0.84,
+        "predicted_return_5d": -0.031,
+        "entry_price": 3.20,
+        "stop_loss": 3.60,
+        "take_profit": 2.60,
+        "technical": {
+            "points": [
+                "Bear flag forming after breakdown below $3.50 support",
+                "RSI at 38 but no bullish divergence to suggest reversal",
+                "Volume profile shows heavy resistance from $3.40 to $3.80",
+            ]
+        },
+        "fundamental": {
+            "points": [
+                "Production 2,200 units/quarter vs 10,000 capacity — massive underutilization",
+                "Operating loss $700M/quarter, widening despite revenue growth",
+                "Piotroski F-Score 2/9, $6B market cap but burning $2.8B/year cash",
+                "Repeated equity offerings diluting shareholders — 15% dilution in last 12 months",
+            ]
+        },
+        "macro": {
+            "points": [
+                "EV competition intensifying from legacy OEMs with scale advantages",
+                "Higher rates making luxury EV financing less attractive to consumers",
+            ]
+        },
+        "ml_insight": "84% SELL probability. Production miss + cash burn + dilution cycle are the dominant negative signals. No positive interaction features triggered.",
+        "risk_context": "$6B market cap EV startup. PIF sovereign wealth backing provides floor but also enables continued dilution. Position at 2%. Meme-stock squeeze risk.",
+        "historical_context": "LCID bear flags with production misses have led to -3.4% median 5-day return (n=5, win rate 80%).",
+    },
+    {
+        "ticker": "BLNK",
+        "short_name": "Blink Charging",
         "sector": "Industrials",
         "action": "SELL",
-        "confidence": 0.83,
-        "predicted_return_5d": -0.032,
-        "entry_price": 178.00,
-        "stop_loss": 185.00,
-        "take_profit": 165.00,
+        "confidence": 0.80,
+        "predicted_return_5d": -0.026,
+        "entry_price": 2.40,
+        "stop_loss": 2.75,
+        "take_profit": 1.95,
         "technical": {
             "points": [
-                "Breakdown below ascending channel support",
-                "RSI at 38 and falling — no oversold bounce yet",
-                "Volume spike on down move confirms distribution",
+                "Lower highs and lower lows on weekly — confirmed long-term downtrend",
+                "50-day MA acting as resistance, price rejected 4 consecutive times",
+                "MACD histogram entrenched in negative territory",
             ]
         },
         "fundamental": {
             "points": [
-                "Production rate recovery slower than guided",
-                "Free cash flow still negative; burn rate of $1.2B/quarter",
-                "Quality control issues leading to delivery delays",
+                "Revenue growing 15% but operating losses expanding faster at 25%",
+                "Stock-based compensation 40% of revenue — massive shareholder dilution",
+                "Piotroski F-Score 3/9 on $300M market cap, no path to profitability visible",
+                "Insider selling accelerating: CFO sold 30% of holdings last quarter",
             ]
         },
         "macro": {
             "points": [
-                "Airline capex cycle peaking as travel growth normalizes",
-                "Defense budget under scrutiny — contract award uncertainty",
+                "EV charging buildout slowing as automakers delay EV targets",
+                "Federal NEVI funding disbursement slower than expected",
             ]
         },
-        "ml_insight": "Strong SELL signal (83%). Negative FCF trend and industrial sector weakness are primary features. Model sees continued downside.",
-        "risk_context": "High-vol name (annualized vol 42%). Position at 4%. Short squeeze risk from retail sentiment. Stop tight at 4%.",
-        "historical_context": "Channel breakdowns in BA have led to -3.5% median 5-day return (n=5, win rate 80%).",
-    },
-    {
-        "ticker": "MSFT",
-        "short_name": "Microsoft Corp.",
-        "sector": "Technology",
-        "action": "BUY",
-        "confidence": 0.88,
-        "predicted_return_5d": 0.026,
-        "entry_price": 420.00,
-        "stop_loss": 408.00,
-        "take_profit": 440.00,
-        "technical": {
-            "points": [
-                "Bounce off 100-day MA with hammer candle",
-                "Accumulation/distribution line trending up",
-                "Fibonacci 38.2% retracement holding as support",
-            ]
-        },
-        "fundamental": {
-            "points": [
-                "Azure revenue growth reaccelerating to 33%",
-                "Copilot monetization adding $2B incremental annual revenue",
-                "Operating leverage improving — margins at 44%",
-            ]
-        },
-        "macro": {
-            "points": [
-                "Enterprise IT spending stable despite macro uncertainty",
-                "AI infrastructure buildout benefiting hyperscalers disproportionately",
-            ]
-        },
-        "ml_insight": "88% BUY probability. Cloud acceleration signal, AI monetization factor, and technical support bounce are key drivers.",
-        "risk_context": "Core holding — position at 8%. Low downside risk given diversified revenue. Antitrust headline risk is manageable.",
-        "historical_context": "MSFT bounces off 100-day MA have yielded 2.9% median 5-day return (n=12, win rate 83%).",
-    },
-    {
-        "ticker": "CVX",
-        "short_name": "Chevron Corp.",
-        "sector": "Energy",
-        "action": "SELL",
-        "confidence": 0.75,
-        "predicted_return_5d": -0.017,
-        "entry_price": 155.00,
-        "stop_loss": 159.50,
-        "take_profit": 148.00,
-        "technical": {
-            "points": [
-                "Lower highs and lower lows on daily — confirmed downtrend",
-                "50-day MA acting as resistance, rejected twice",
-                "MACD histogram deepening into negative territory",
-            ]
-        },
-        "fundamental": {
-            "points": [
-                "Hess acquisition regulatory uncertainty dragging on stock",
-                "Permian Basin production growth slowing QoQ",
-                "Dividend yield attractive but FCF coverage thinning",
-            ]
-        },
-        "macro": {
-            "points": [
-                "Natural gas prices depressed — hurts integrated margins",
-                "ESG fund outflows from energy sector continuing",
-            ]
-        },
-        "ml_insight": "SELL probability 72%. Energy sector momentum is negative. Downtrend persistence signal triggered.",
-        "risk_context": "Position at 4%. Energy stocks subject to geopolitical supply shocks (tail risk). Dividend support may slow decline.",
-        "historical_context": "CVX in confirmed downtrends has seen -1.9% median 5-day return (n=8, win rate 63%).",
+        "ml_insight": "80% SELL probability. Insider selling + SBC dilution + unprofitable growth create negative composite. Quality deterioration signal active.",
+        "risk_context": "$300M micro-cap EV infrastructure name. Extremely illiquid, wide spreads. Potential penny-stock volatility. Position at 2% max.",
+        "historical_context": "BLNK in confirmed downtrends with insider selling has seen -2.8% median 5-day return (n=7, win rate 71%).",
     },
 ]
 

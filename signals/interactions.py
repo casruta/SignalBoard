@@ -82,4 +82,25 @@ def compute_interaction_features(feature_matrix: pd.DataFrame) -> pd.DataFrame:
         oversold_indicator = np.where(df["rsi_14"] < 30, 1.0, 0.0)
         df["value_x_oversold"] = df["fund_value_score"] * oversold_indicator
 
+    # ── Small-Cap Alpha Interactions ──────────────────────────────────
+
+    # Insider buying + volume spike = institutional front-running signal
+    if "fund_insider_cluster_buy" in df.columns and "volume_ratio" in df.columns:
+        df["insider_x_volume"] = df["fund_insider_cluster_buy"] * df["volume_ratio"]
+
+    # Short squeeze setup: high short interest + oversold RSI
+    if "fund_short_squeeze_score" in df.columns and "rsi_14" in df.columns:
+        oversold = np.where(df["rsi_14"] < 35, (35 - df["rsi_14"]) / 35, 0.0)
+        df["short_squeeze_setup"] = df["fund_short_squeeze_score"] * oversold
+
+    # Undiscovered value: high DCF upside + low analyst coverage
+    if "fund_dcf_upside_pct" in df.columns and "fund_analyst_count" in df.columns:
+        low_coverage = np.where(df["fund_analyst_count"] < 8, 1.0, 0.5)
+        df["undiscovered_value"] = df["fund_dcf_upside_pct"].clip(lower=0) * low_coverage
+
+    # Quality momentum: strong Piotroski + positive price momentum
+    if "fund_piotroski_f_score" in df.columns and "momentum_5" in df.columns:
+        quality = df["fund_piotroski_f_score"] / 9.0  # normalize to 0-1
+        df["quality_momentum"] = quality * df["momentum_5"].clip(lower=0)
+
     return df

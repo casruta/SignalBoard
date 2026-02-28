@@ -1,9 +1,13 @@
 """Fetch fundamental / financial data via yfinance."""
 
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import pandas as pd
 import yfinance as yf
+
+logger = logging.getLogger(__name__)
 
 CACHE_DIR = Path(__file__).parent / "cache" / "fundamentals"
 
@@ -40,17 +44,25 @@ def fetch_fundamentals(ticker: str, force_refresh: bool = False) -> dict:
 
 
 def fetch_fundamentals_bulk(
-    tickers: list[str], force_refresh: bool = False
+    tickers: list[str], force_refresh: bool = False, max_workers: int = 8
 ) -> pd.DataFrame:
-    """Return a DataFrame of fundamentals, one row per ticker."""
+    """Return a DataFrame of fundamentals, one row per ticker (fetched in parallel)."""
     rows = []
-    for t in tickers:
-        try:
-            row = fetch_fundamentals(t, force_refresh=force_refresh)
-            row["ticker"] = t
-            rows.append(row)
-        except Exception:
-            continue
+
+    def _fetch_one(t):
+        row = fetch_fundamentals(t, force_refresh=force_refresh)
+        row["ticker"] = t
+        return row
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_fetch_one, t): t for t in tickers}
+        for future in as_completed(futures):
+            ticker = futures[future]
+            try:
+                rows.append(future.result())
+            except Exception as e:
+                logger.warning("Fundamentals fetch failed for %s: %s", ticker, e)
+
     if not rows:
         return pd.DataFrame()
     return pd.DataFrame(rows).set_index("ticker")

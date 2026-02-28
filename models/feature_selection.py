@@ -5,17 +5,34 @@ import pandas as pd
 from sklearn.feature_selection import mutual_info_classif
 
 
+FUNDAMENTAL_PROTECTED = [
+    "fund_piotroski_f_score",
+    "fund_dcf_upside_pct",
+    "fund_insider_cluster_buy",
+    "fund_blindspot_score",
+    "fund_accruals_ratio",
+    "fund_roic_vs_wacc_spread",
+    "fund_fcf_to_net_income",
+    "fund_altman_z_score",
+    "fund_dcf_margin_of_safety",
+    "fund_insider_ownership_pct",
+    "fund_earnings_surprise_consistency",
+]
+
+
 def select_features(
     X: pd.DataFrame,
     y: pd.Series,
     mi_threshold: float = 0.01,
-    corr_threshold: float = 0.90,
+    corr_threshold: float = 0.80,
     max_features: int | None = None,
+    protected_features: list[str] | None = None,
 ) -> list[str]:
     """Select features using mutual information + correlation pruning.
 
     1. Score each feature by mutual information with the target.
-    2. Remove features with MI below threshold (uninformative).
+    2. Remove features with MI below threshold (uninformative),
+       except protected fundamental features which bypass the MI gate.
     3. Among highly-correlated feature pairs (>corr_threshold),
        keep the one with higher MI score.
 
@@ -26,12 +43,17 @@ def select_features(
     mi_threshold : minimum mutual information score to keep a feature
     corr_threshold : max allowed pairwise correlation before pruning
     max_features : optional cap on total feature count
+    protected_features : feature names that bypass MI threshold filtering
+        (defaults to FUNDAMENTAL_PROTECTED). Still subject to correlation pruning.
 
     Returns
     -------
     List of selected feature names.
     """
-    X_filled = X.fillna(0)
+    if protected_features is None:
+        protected_features = FUNDAMENTAL_PROTECTED
+
+    X_filled = X.fillna(X.median())
 
     # Step 1: Compute mutual information scores
     mi_scores = mutual_info_classif(
@@ -44,6 +66,12 @@ def select_features(
     if not selected:
         # Keep at least the top 10 if nothing passes threshold
         selected = mi_series.head(10).index.tolist()
+
+    # Step 2b: Add protected features that are present in X but missed the MI gate
+    protected_in_X = [f for f in protected_features if f in X.columns]
+    for feat in protected_in_X:
+        if feat not in selected:
+            selected.append(feat)
 
     # Step 3: Pairwise correlation pruning
     selected = _prune_correlated(X_filled[selected], mi_series, corr_threshold)
@@ -92,7 +120,7 @@ def feature_importance_report(
 
     Returns DataFrame with columns: feature, mi_score, abs_correlation_with_target.
     """
-    X_filled = X.fillna(0)
+    X_filled = X.fillna(X.median())
 
     # Mutual information
     mi_scores = mutual_info_classif(
