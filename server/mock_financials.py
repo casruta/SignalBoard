@@ -8,6 +8,35 @@ from typing import Dict, List, Optional
 import numpy as np
 from data.universe_builder import _SECTOR_TICKERS
 
+_NAMES = {
+    "RRC": "Range Resources", "NOG": "Northern Oil & Gas", "AR": "Antero Resources",
+    "TRGP": "Targa Resources", "MTDR": "Matador Resources", "SM": "SM Energy",
+    "FOXF": "Fox Factory", "PLNT": "Planet Fitness", "BROS": "Dutch Bros",
+    "DDOG": "Datadog", "NET": "Cloudflare", "BILL": "BILL Holdings",
+    "HALO": "Halozyme", "NBIX": "Neurocrine Bio", "RARE": "Ultragenyx",
+    "TREX": "Trex Company", "GNRC": "Generac", "FIX": "Comfort Systems",
+    "STEP": "StepStone Group", "PIPR": "Piper Sandler", "IBKR": "Interactive Brokers",
+    "CLF": "Cleveland-Cliffs", "ATI": "ATI Inc", "CRS": "Carpenter Technology",
+    "CALM": "Cal-Maine Foods", "FLO": "Flowers Foods",
+    "SKY": "Skyline Champion", "GRBK": "Green Brick Partners",
+    "ONTO": "Onto Innovation", "AEIS": "Advanced Energy",
+    "UFPI": "UFP Industries", "GMS": "GMS Inc", "EPAM": "EPAM Systems",
+    "LNTH": "Lantheus Holdings", "BOOT": "Boot Barn Holdings", "CEIX": "CONSOL Energy",
+    "ENSG": "Ensign Group", "DOCN": "DigitalOcean",
+    "DINO": "HF Sinclair", "GPOR": "Gulfport Energy", "CTRA": "Coterra Energy",
+    "HP": "Helmerich & Payne", "DVN": "Devon Energy", "MUR": "Murphy Oil",
+    "OVV": "Ovintiv", "CHRD": "Chord Energy", "PR": "Permian Resources",
+    "PTEN": "Patterson-UTI", "WHD": "Cactus Inc", "LBRT": "Liberty Energy",
+    "CROX": "Crocs Inc", "DKS": "Dick's Sporting", "DECK": "Deckers Outdoor",
+    "BURL": "Burlington Stores", "AEO": "American Eagle", "ANF": "Abercrombie & Fitch",
+    "MDB": "MongoDB", "SNOW": "Snowflake", "CRWD": "CrowdStrike", "ZS": "Zscaler",
+    "VEEV": "Veeva Systems", "GLOB": "Globant", "WDAY": "Workday",
+    "MEDP": "Medpace", "EXAS": "Exact Sciences", "IONS": "Ionis Pharma",
+    "AZEK": "AZEK Company", "BLDR": "Builders FirstSource", "VMC": "Vulcan Materials",
+    "MLM": "Martin Marietta", "EXP": "Eagle Materials",
+    "CVNA": "Carvana", "DASH": "DoorDash", "RBLX": "Roblox",
+}
+
 # Sector defaults: gm, om, nm, ev/rev, tax, d&a%, capex%, div_yield, beta
 _SD = {
     "Energy":       (.35,.18,.12, 1.8,.22,.08,.12,.015, 1.2),
@@ -267,7 +296,7 @@ def _build_comps(p: dict, a: _Anchors, sh: float, sig: dict, isd: List[dict]) ->
         peve = jit(eve_s if eve_s>0 else 12.0, 0.2)
         ppe = jit(pe_s if pe_s>0 else 18.0, 0.2)
         peg = ppe/(prg*100) if prg>0 else 0
-        peers.append({"name":tk,"ticker":tk,"ev":round(jit(ev_s,.25),0),
+        peers.append({"name":_NAMES.get(tk, tk),"ticker":tk,"ev":round(jit(ev_s,.25),0),
             "ev_revenue":round(pevr,2),"ev_ebitda":round(peve,2),"pe_fwd":round(ppe,2),
             "peg":round(peg,2),"rev_growth":round(prg,4),"ebitda_margin":round(pem,4),
             "net_margin":round(pnm,4),"roic":round(pro,4)})
@@ -338,12 +367,24 @@ def generate_mock_report(signal: dict) -> dict:
     # Catalysts
     tpts = signal.get("technical",{}).get("points",[])[:2]
     mpts = signal.get("macro",{}).get("points",[])[:2]
-    cats = [{"date":"Next 30 days","event":pt,"impact":"Positive" if act=="BUY" else "Negative"} for pt in tpts+mpts]
+    _cat_dates = ["Next 7 days", "Next 30 days", "Next quarter", "Next 6 months"]
+    cats = [{"date":_cat_dates[i] if i < len(_cat_dates) else "Next 6 months",
+             "event":pt,"impact":"Positive" if act=="BUY" else "Negative"}
+            for i, pt in enumerate(tpts+mpts)]
     # Risks
-    rsks = [{"factor":s.strip(),"severity":"Medium","probability":"Moderate","detail":s.strip()}
-            for s in re.split(r'[.]', signal.get("risk_context","")) if len(s.strip())>10]
-    if not rsks: rsks = [{"factor":"General market risk","severity":"Medium","probability":"Moderate",
-                          "detail":"Broad market downturn could impact share price."}]
+    _sev_cycle = ["High", "Medium", "Low"]
+    _prob_cycle = ["High", "Moderate", "Low"]
+    raw_risks = [s.strip() for s in re.split(r'[.]', signal.get("risk_context","")) if len(s.strip()) > 10]
+    rsks = [{"factor": s, "severity": _sev_cycle[i % 3], "probability": _prob_cycle[i % 3],
+             "detail": f"{s}. This could materially impact {'revenue growth' if i % 3 == 0 else 'margin trajectory' if i % 3 == 1 else 'investor sentiment'} over the next 12 months."}
+            for i, s in enumerate(raw_risks)]
+    if not rsks:
+        rsks = [{"factor": "General market risk", "severity": "High", "probability": "High",
+                 "detail": "Broad market downturn could impact share price and compress valuation multiples."}]
+    rsks.append({"factor": "Broader market correction", "severity": "Medium", "probability": "Moderate",
+                 "detail": "Macroeconomic downturn or risk-off sentiment could compress valuations across the sector."})
+    rsks.append({"factor": "Liquidity risk", "severity": "Low", "probability": "Low",
+                 "detail": "Small-mid cap names may face wider bid-ask spreads during periods of market stress."})
     mo = _moat(sec, anc.piotroski, p["roic"], p["wacc"])
     i0, b0 = isd[-1], bsd[-1]
     te, ta = b0["total_equity"], b0["total_assets"]
@@ -352,7 +393,11 @@ def generate_mock_report(signal: dict) -> dict:
         "header":{"ticker":signal["ticker"],"name":signal.get("short_name",""),"sector":sec,
             "industry":sec,"exchange":"NASDAQ","date":datetime.now().strftime("%Y-%m-%d"),
             "rating":rat,"price_target":round(bl,2),"current_price":price,"upside_pct":round(up,4)},
-        "thesis":{"text":signal.get("ml_insight","")},
+        "thesis":{"text":f"{rat} with ${bl:.2f} price target ({up:+.1%} upside). "
+                         f"{signal.get('ml_insight','')} "
+                         f"Trading at {p['ev_rev']:.1f}x EV/Revenue vs "
+                         f"{comps['peer_median']['ev_revenue']:.1f}x peer median suggests "
+                         f"{'meaningful discount to' if p['ev_rev'] < comps['peer_median']['ev_revenue'] else 'premium over'} comparable companies."},
         "snapshot":{"market_cap":round(mc,0),"enterprise_value":round(ev,0),
             "shares_outstanding":round(sh,0),
             "range_52w_low":round(price*random.uniform(.65,.85),2),

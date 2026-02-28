@@ -641,6 +641,24 @@ body[data-page="detail"] {
   list-style: none;
 }
 
+.toc-title {
+  font-family: 'EB Garamond', Georgia, serif;
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--fg);
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.report-toc ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
 .report-toc a {
   display: block;
   font-size: 0.68rem;
@@ -662,6 +680,10 @@ body[data-page="detail"] {
   padding: 24px 20px 60px;
   flex: 1;
   min-width: 0;
+}
+
+.report-layout .detail-container {
+  max-width: 720px;
 }
 
 /* ── Report sections ─────────────────────────────────────── */
@@ -711,6 +733,46 @@ body[data-page="detail"] {
   border-bottom: 1px solid var(--rule);
 }
 
+.report-header h1 {
+  font-family: 'EB Garamond', Georgia, serif;
+  font-size: 1.8rem;
+  font-weight: 500;
+}
+
+.header-ticker {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.header-meta {
+  display: block;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.header-date {
+  display: block;
+  font-size: 0.65rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.report-header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.report-header-info {
+  flex: 1;
+}
+
 .report-header .ticker {
   font-family: 'JetBrains Mono', monospace;
   font-size: 2rem;
@@ -754,6 +816,28 @@ body[data-page="detail"] {
   flex-wrap: wrap;
 }
 
+.pt-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.pt-label {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.pt-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.1rem;
+  font-weight: 500;
+}
+
+.pt-value.positive { color: var(--green); }
+.pt-value.negative { color: var(--red); }
+
 /* ── Financial tables ────────────────────────────────────── */
 
 .fin-table-wrapper {
@@ -768,8 +852,18 @@ body[data-page="detail"] {
   font-size: 0.75rem;
 }
 
+.fin-table h4,
+.fin-table-wrapper h4 {
+  font-family: 'EB Garamond', Georgia, serif;
+  font-size: 0.9rem;
+  font-weight: 500;
+  margin-bottom: 8px;
+  color: var(--fg);
+  text-transform: none;
+}
+
 .fin-table th {
-  text-align: left;
+  text-align: right;
   padding: 6px 10px;
   border-bottom: 2px solid var(--rule);
   font-weight: 500;
@@ -777,6 +871,14 @@ body[data-page="detail"] {
   font-size: 0.65rem;
   letter-spacing: 0.05em;
   color: var(--muted);
+}
+
+.fin-table th:first-child {
+  text-align: left;
+}
+
+.fin-table tbody tr:nth-child(even) {
+  background: rgba(212, 208, 200, 0.04);
 }
 
 .fin-table td {
@@ -835,16 +937,17 @@ body[data-page="detail"] {
 }
 
 .sensitivity-grid td.positive {
-  background: rgba(45, 106, 79, 0.12);
+  background: rgba(45, 106, 79, 0.18);
   color: var(--green);
 }
 
 .sensitivity-grid td.negative {
-  background: rgba(193, 41, 46, 0.12);
+  background: rgba(193, 41, 46, 0.18);
   color: var(--red);
 }
 
 .sensitivity-grid td.base-case {
+  background: rgba(44, 95, 45, 0.25);
   font-weight: 700;
   border: 2px solid var(--fg);
 }
@@ -858,11 +961,15 @@ body[data-page="detail"] {
 }
 
 .snapshot-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   padding: 8px 0;
   border-bottom: 1px solid rgba(212, 208, 200, 0.3);
 }
 
 .snapshot-label {
+  display: block;
   font-size: 0.72rem;
   color: var(--muted);
   text-transform: uppercase;
@@ -870,6 +977,7 @@ body[data-page="detail"] {
 }
 
 .snapshot-value {
+  display: block;
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.85rem;
 }
@@ -920,7 +1028,11 @@ body[data-page="detail"] {
 }
 
 .comps-table .subject-row {
-  background: rgba(212, 208, 200, 0.08);
+  background: rgba(44, 95, 45, 0.06);
+  font-weight: 500;
+}
+
+.comps-table .subject-row td {
   font-weight: 500;
 }
 
@@ -935,26 +1047,57 @@ body[data-page="detail"] {
   font-weight: 500;
 }
 
-.risk-badge.high { background: #c1292e; }
-.risk-badge.med  { background: #b08600; }
-.risk-badge.low  { background: #2d6a4f; }
+.risk-badge.high     { background: #c1292e; }
+.risk-badge.med      { background: #b08600; }
+.risk-badge.medium   { background: #b08600; }
+.risk-badge.moderate { background: #b08600; }
+.risk-badge.low      { background: #2d6a4f; }
 
 /* ── Verdict section ─────────────────────────────────────── */
 
 .verdict-box {
   background: rgba(212, 208, 200, 0.06);
-  padding: 24px;
+  padding: 28px;
+  text-align: center;
   border-radius: 4px;
   border: 1px solid var(--rule);
 }
 
 .verdict-rating {
-  font-size: 1.1rem;
+  font-family: 'EB Garamond', Georgia, serif;
+  font-size: 1.6rem;
+  font-weight: 500;
+  margin-bottom: 8px;
+  display: block;
 }
+
+.verdict-rating.strong-buy { color: var(--green); }
+.verdict-rating.buy        { color: var(--green); }
+.verdict-rating.hold       { color: var(--muted); }
+.verdict-rating.sell       { color: var(--red); }
+.verdict-rating.strong-sell { color: var(--red); }
 
 .verdict-target {
   font-family: 'JetBrains Mono', monospace;
   font-size: 1.3rem;
+  margin-bottom: 6px;
+  display: block;
+}
+
+.verdict-confidence {
+  font-size: 0.82rem;
+  color: var(--muted);
+  display: block;
+  margin-bottom: 12px;
+}
+
+.verdict-summary {
+  font-family: 'EB Garamond', Georgia, serif;
+  font-size: 0.95rem;
+  line-height: 1.7;
+  font-style: italic;
+  max-width: 600px;
+  margin: 0 auto;
 }
 
 /* ── Thesis section ──────────────────────────────────────── */
@@ -1019,9 +1162,20 @@ body[data-page="detail"] {
 
 .pt-bar {
   display: flex;
-  height: 8px;
+  height: 24px;
   border-radius: 4px;
   overflow: hidden;
+  margin-top: 16px;
+}
+
+.pt-bar-segment {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
 }
 
 .pt-bar .dcf-segment    { background: #2d6a4f; }
