@@ -389,6 +389,51 @@ def generate_mock_report(signal: dict) -> dict:
     i0, b0 = isd[-1], bsd[-1]
     te, ta = b0["total_equity"], b0["total_assets"]
     rv, cg, inv, recv, ap_ = i0["revenue"], i0["cogs"], b0["inventory"], b0["receivables"], b0["accounts_payable"]
+    cap = {"net_debt":round(nd,0),
+        "net_debt_ebitda":round(nd/i0["ebitda"] if i0["ebitda"] else 0,2),
+        "debt_to_equity":round((b0["long_term_debt"]+b0["short_term_debt"])/te if te else 0,2),
+        "interest_coverage":round(i0["operating_income"]/i0["interest_expense"] if i0["interest_expense"] else 0,2),
+        "current_ratio":round(b0["total_current_assets"]/b0["total_current_liabilities"] if b0["total_current_liabilities"] else 0,2),
+        "quick_ratio":round((b0["cash"]+b0["receivables"])/b0["total_current_liabilities"] if b0["total_current_liabilities"] else 0,2)}
+    prof = {"roe":round(i0["net_income"]/te if te else 0,4),
+        "roa":round(i0["net_income"]/ta if ta else 0,4),"roic":round(p["roic"],4),
+        "asset_turnover":round(rv/ta if ta else 0,4),
+        "inventory_turnover":round(cg/inv if inv else 0,2),
+        "dso":round(recv/rv*365 if rv else 0,1),
+        "dpo":round(ap_/cg*365 if cg else 0,1),
+        "cash_conversion_cycle":round((recv/rv*365+inv/cg*365-ap_/cg*365) if rv and cg else 0,1)}
+    # ── Section summaries ──────────────────────────────────────
+    _fmt_m = lambda v: f"${v/1e6:.0f}M" if abs(v) < 1e9 else f"${v/1e9:.1f}B"
+    snap = {"market_cap":round(mc,0),"enterprise_value":round(ev,0),
+        "shares_outstanding":round(sh,0),
+        "range_52w_low":round(price*random.uniform(.65,.85),2),
+        "range_52w_high":round(price*random.uniform(1.10,1.40),2),
+        "avg_volume_3m":round(sh*random.uniform(.008,.02),0),
+        "dividend_yield":round(p["div"],4),"beta":round(p["beta"],2),
+        "short_interest_pct":round(anc.short_interest or random.uniform(.02,.06),4)}
+    iv_prices = [iv["implied_price"] for iv in comps["implied_valuation"] if iv["implied_price"] > 0]
+    iv_avg = sum(iv_prices)/len(iv_prices) if iv_prices else ca
+    iv_gap = round((iv_avg/price - 1)*100, 1) if price else 0
+    high_risk_ct = sum(1 for r in rsks if r["severity"] == "High")
+    roic_spread = round((p["roic"] - p["wacc"])*10000)
+    summaries = {
+        "thesis": f"{rat}. {up:+.1%} upside to ${bl:.2f}. EV/Rev {p['ev_rev']:.1f}x vs {comps['peer_median']['ev_revenue']:.1f}x peer median.",
+        "snapshot": f"{_fmt_m(mc)} cap, {p['beta']:.2f} beta, {snap['short_interest_pct']:.1%} SI. 52w range ${snap['range_52w_low']:.0f}\u2013${snap['range_52w_high']:.0f}.",
+        "income": f"Revenue {_fmt_m(i0['revenue'])} growing {i0.get('yoy_growth',0):.1%}. GM {i0['gross_margin']:.1%}, OM {i0['operating_margin']:.1%}. EPS ${i0['diluted_eps']:.2f}.",
+        "balance": f"BV ${b0['book_value_per_share']:.2f}/sh. Current ratio {cap['current_ratio']:.1f}x. Net debt {_fmt_m(nd)} ({cap['net_debt_ebitda']:.1f}x EBITDA).",
+        "capital": f"Net debt/EBITDA {cap['net_debt_ebitda']:.1f}x. Interest coverage {cap['interest_coverage']:.1f}x. D/E {cap['debt_to_equity']:.2f}x. Quick {cap['quick_ratio']:.1f}x.",
+        "cashflow": f"FCF {_fmt_m(cfd[-1]['fcf'])} ({cfd[-1]['fcf_margin']:.1%} margin, {cfd[-1]['fcf_yield']:.1%} yield). CFO {_fmt_m(cfd[-1]['cfo'])}.",
+        "dcf": f"Implied ${dcf['output']['implied_price']:.2f}/sh ({dcf['output']['upside_pct']:+.1%}). WACC {dcf['assumptions']['wacc']:.1%}, TGR {dcf['assumptions']['terminal_growth']:.1%}. Terminal = {dcf['output']['terminal_pct_of_total']:.0%} of EV.",
+        "comps": f"EV/Rev {comps['subject']['ev_revenue']:.1f}x vs {comps['peer_median']['ev_revenue']:.1f}x peers ({comps['premium_discount']['ev_revenue']:+.1f}%). EV/EBITDA {comps['subject']['ev_ebitda']:.1f}x vs {comps['peer_median']['ev_ebitda']:.1f}x.",
+        "impliedval": f"Comps imply ${iv_avg:.2f}/sh ({iv_gap:+.1f}% vs current). Average of {len(iv_prices)} methods.",
+        "profitability": f"ROIC {prof['roic']:.1%} vs {p['wacc']:.1%} WACC ({roic_spread:+,}bps spread). ROE {prof['roe']:.1%}. DSO {prof['dso']:.0f} days, CCC {prof['cash_conversion_cycle']:.0f} days.",
+        "catalysts": f"{len(cats)} catalyst{'s' if len(cats)!=1 else ''} identified. Nearest: {cats[0]['event'][:80] if cats else 'None'} ({cats[0]['date'] if cats else 'N/A'}).",
+        "moat": f"{mo['rating']} moat. {mo['market_share']:.1%} share of {_fmt_m(mo['tam'])} TAM.",
+        "risks": f"{len(rsks)} risk factors. {high_risk_ct} rated high severity. Primary: {rsks[0]['factor'][:60]}.",
+        "viewchangers": f"Bull: revenue above {abs(p['rg'])*100+5:.0f}%, margin expansion. Bear: growth below {max(abs(p['rg'])*100-8,0):.0f}%, guidance cut.",
+        "pricetarget": f"Blended ${bl:.2f}: DCF ${dp:.2f} (50%), comps ${ca:.2f} (30%), technical ${tt:.2f} (20%).",
+        "verdict": f"{rat} at {conf:.0%} confidence. ${bl:.2f} target = {up:+.1%} upside.",
+    }
     return {
         "header":{"ticker":signal["ticker"],"name":signal.get("short_name",""),"sector":sec,
             "industry":sec,"exchange":"NASDAQ","date":datetime.now().strftime("%Y-%m-%d"),
@@ -398,28 +443,11 @@ def generate_mock_report(signal: dict) -> dict:
                          f"Trading at {p['ev_rev']:.1f}x EV/Revenue vs "
                          f"{comps['peer_median']['ev_revenue']:.1f}x peer median suggests "
                          f"{'meaningful discount to' if p['ev_rev'] < comps['peer_median']['ev_revenue'] else 'premium over'} comparable companies."},
-        "snapshot":{"market_cap":round(mc,0),"enterprise_value":round(ev,0),
-            "shares_outstanding":round(sh,0),
-            "range_52w_low":round(price*random.uniform(.65,.85),2),
-            "range_52w_high":round(price*random.uniform(1.10,1.40),2),
-            "avg_volume_3m":round(sh*random.uniform(.008,.02),0),
-            "dividend_yield":round(p["div"],4),"beta":round(p["beta"],2),
-            "short_interest_pct":round(anc.short_interest or random.uniform(.02,.06),4)},
+        "snapshot":snap,
         "income_statement":isd, "balance_sheet":bsd,
-        "capital_structure":{"net_debt":round(nd,0),
-            "net_debt_ebitda":round(nd/i0["ebitda"] if i0["ebitda"] else 0,2),
-            "debt_to_equity":round((b0["long_term_debt"]+b0["short_term_debt"])/te if te else 0,2),
-            "interest_coverage":round(i0["operating_income"]/i0["interest_expense"] if i0["interest_expense"] else 0,2),
-            "current_ratio":round(b0["total_current_assets"]/b0["total_current_liabilities"] if b0["total_current_liabilities"] else 0,2),
-            "quick_ratio":round((b0["cash"]+b0["receivables"])/b0["total_current_liabilities"] if b0["total_current_liabilities"] else 0,2)},
+        "capital_structure":cap,
         "cash_flow":cfd, "dcf":dcf, "comps":comps,
-        "profitability":{"roe":round(i0["net_income"]/te if te else 0,4),
-            "roa":round(i0["net_income"]/ta if ta else 0,4),"roic":round(p["roic"],4),
-            "asset_turnover":round(rv/ta if ta else 0,4),
-            "inventory_turnover":round(cg/inv if inv else 0,2),
-            "dso":round(recv/rv*365 if rv else 0,1),
-            "dpo":round(ap_/cg*365 if cg else 0,1),
-            "cash_conversion_cycle":round((recv/rv*365+inv/cg*365-ap_/cg*365) if rv and cg else 0,1)},
+        "profitability":prof,
         "catalysts":cats, "moat":mo, "risks":rsks,
         "view_changers":{"bullish":[
                 f"Revenue growth accelerates above {abs(p['rg'])*100+5:.0f}%",
@@ -432,4 +460,5 @@ def generate_mock_report(signal: dict) -> dict:
             "comps_value":round(ca,2),"technical_weight":0.20,"technical_value":round(tt,2),
             "blended":round(bl,2)},
         "verdict":{"rating":rat,"price_target":round(bl,2),"confidence":round(conf,4),
-            "summary":f"{rat} with {bl:.2f} price target ({up:+.1%} upside). {signal.get('ml_insight','')}"}}
+            "summary":f"{rat} with {bl:.2f} price target ({up:+.1%} upside). {signal.get('ml_insight','')}"},
+        "section_summaries":summaries}

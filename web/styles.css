@@ -1307,6 +1307,75 @@ body[data-page="detail"] {
   padding: 3px 0;
 }
 
+/* ── Section Summary Panels ────────────────────────────────── */
+
+.report-section-header[data-summary] {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.report-section-header[data-summary]:hover {
+  background: rgba(212, 208, 200, 0.08);
+}
+
+.report-section-header.summary-active {
+  background: rgba(26, 26, 26, 0.04);
+}
+
+.section-summary {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.35s ease, opacity 0.25s ease;
+  opacity: 0;
+}
+
+.section-summary.open {
+  max-height: 160px;
+  opacity: 1;
+}
+
+.section-summary-inner {
+  position: relative;
+  background: #fff;
+  border: 1px solid rgba(212, 208, 200, 0.5);
+  border-radius: 3px;
+  padding: 14px 18px 14px 18px;
+  margin: 8px 0 4px 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  font-weight: 300;
+  line-height: 1.7;
+  color: var(--fg);
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.04),
+    0 4px 12px rgba(0, 0, 0, 0.03);
+}
+
+.section-summary.open .section-summary-inner::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 3px;
+  background: var(--fg);
+  animation: summary-accent 0.6s ease-out forwards;
+}
+
+@keyframes summary-accent {
+  from { height: 0; }
+  to   { height: 100%; }
+}
+
+.summary-label {
+  display: block;
+  font-size: 0.55rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
 .trigger-list li::before {
   margin-right: 8px;
 }
