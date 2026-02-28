@@ -13,6 +13,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config_loader import load_config
 from server.database import Database
+from server.mock_financials import generate_mock_report
 from server.scheduler import run_daily_pipeline
 
 logger = logging.getLogger(__name__)
@@ -140,6 +141,16 @@ async def trigger_pipeline():
     """Manually trigger the daily pipeline (for testing)."""
     results = await run_daily_pipeline(_config)
     return {"status": "complete", "signals_generated": len(results)}
+
+
+@app.get("/report/{ticker}")
+async def get_report(ticker: str):
+    """Generate a full financial report for a ticker."""
+    signal_data = _db.get_signal_detail(ticker.upper())
+    if signal_data is None:
+        raise HTTPException(status_code=404, detail="Signal not found")
+    report = generate_mock_report(signal_data)
+    return report
 
 
 # ── Web frontend ─────────────────────────────────────────────

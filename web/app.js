@@ -180,10 +180,637 @@
 
         titleEl.textContent = ticker.toUpperCase();
 
-        if (source === "screened") {
-            fetchScreenedDetail(ticker);
-        } else {
-            fetchLegacyDetail(ticker);
+        fetchReport(ticker);
+
+        async function fetchReport(ticker) {
+            contentEl.innerHTML = '<div class="loading"></div>';
+            try {
+                var res = await fetch("/report/" + encodeURIComponent(ticker));
+                if (!res.ok) throw new Error("Not found");
+                var data = await res.json();
+                contentEl.innerHTML = renderReport(data);
+                var tocEl = document.getElementById("report-toc");
+                if (tocEl) renderTOC(tocEl);
+            } catch (err) {
+                console.error("Report render failed:", err);
+                // Fallback: try screened detail, then legacy
+                if (source === "screened") {
+                    fetchScreenedDetail(ticker);
+                } else {
+                    fetchLegacyDetail(ticker);
+                }
+            }
+        }
+
+        // ── Report rendering ─────────────────────────────────────
+
+        function renderReport(data) {
+            var sections = [
+                { id: "thesis", title: "Investment Thesis", html: renderThesis(data.thesis) },
+                { id: "snapshot", title: "Market Snapshot", html: renderSnapshot(data.snapshot) },
+                { id: "income", title: "Income Statement", html: renderIncomeStatement(data.income_statement) },
+                { id: "balance", title: "Balance Sheet", html: renderBalanceSheet(data.balance_sheet) },
+                { id: "capital", title: "Capital Structure", html: renderCapitalStructure(data.capital_structure) },
+                { id: "cashflow", title: "Cash Flow Statement", html: renderCashFlow(data.cash_flow) },
+                { id: "dcf", title: "DCF Valuation", html: renderDCF(data.dcf) },
+                { id: "comps", title: "Comparable Companies", html: renderComps(data.comps) },
+                { id: "profitability", title: "Profitability & Efficiency", html: renderProfitability(data.profitability) },
+                { id: "catalysts", title: "Catalysts & Events", html: renderCatalysts(data.catalysts) },
+                { id: "moat", title: "Competitive Moat", html: renderMoat(data.moat) },
+                { id: "risks", title: "Risk Factors", html: renderRisks(data.risks) },
+                { id: "viewchangers", title: "View Changers", html: renderViewChangers(data.view_changers) },
+                { id: "pricetarget", title: "Price Target Derivation", html: renderPriceTarget(data.price_target) },
+                { id: "verdict", title: "Verdict", html: renderVerdict(data.verdict) }
+            ];
+
+            var html = renderReportHeader(data.header);
+            for (var i = 0; i < sections.length; i++) {
+                var s = sections[i];
+                if (!s.html) continue;
+                html += wrapSection(s.id, s.title, s.html);
+            }
+
+            // Store sections for TOC building
+            window._reportSections = sections.filter(function (s) { return !!s.html; });
+
+            return html;
+        }
+
+        function wrapSection(id, title, content) {
+            return (
+                '<section class="report-section" id="section-' + id + '">' +
+                '<div class="report-section-header" onclick="toggleSection(\'' + id + '\')">' +
+                '<span class="chevron">&#9656;</span> ' + escapeHtml(title) +
+                '</div>' +
+                '<div class="report-section-body" id="body-' + id + '">' +
+                content +
+                '</div></section>'
+            );
+        }
+
+        function renderTOC(tocEl) {
+            var sections = window._reportSections || [];
+            var html = '<div class="toc-title">Contents</div><ul>';
+            for (var i = 0; i < sections.length; i++) {
+                var s = sections[i];
+                html += '<li><a href="#section-' + s.id + '" onclick="event.preventDefault(); document.getElementById(\'section-' + s.id + '\').scrollIntoView({behavior:\'smooth\'})">' + escapeHtml(s.title) + '</a></li>';
+            }
+            html += '</ul>';
+            tocEl.innerHTML = html;
+        }
+
+        function renderReportHeader(h) {
+            if (!h) return "";
+            var ratingClass = (h.rating || "").toLowerCase().replace(/\s+/g, "-");
+            var upsideClass = (h.upside_pct || 0) >= 0 ? "positive" : "negative";
+            var html = '<div class="report-header">';
+            html += '<div class="report-header-top">';
+            html += '<div class="report-header-info">';
+            html += '<h1>' + escapeHtml(h.name || h.ticker) + ' <span class="header-ticker">(' + escapeHtml(h.ticker) + ')</span></h1>';
+            html += '<span class="header-meta">' + escapeHtml([h.sector, h.industry, h.exchange].filter(Boolean).join(" | ")) + '</span>';
+            html += '<span class="header-date">' + escapeHtml(h.date || "") + '</span>';
+            html += '</div>';
+            html += '<div class="rating-badge ' + ratingClass + '">' + escapeHtml(h.rating || "N/A") + '</div>';
+            html += '</div>';
+            html += '<div class="price-target-row">';
+            html += '<div class="pt-item"><span class="pt-label">Current</span><span class="pt-value">' + fmtUSD(h.current_price) + '</span></div>';
+            html += '<div class="pt-item"><span class="pt-label">Target</span><span class="pt-value">' + fmtUSD(h.price_target) + '</span></div>';
+            html += '<div class="pt-item"><span class="pt-label">Upside</span><span class="pt-value ' + upsideClass + '">' + fmtPctReport(h.upside_pct) + '</span></div>';
+            html += '</div></div>';
+            return html;
+        }
+
+        function renderThesis(t) {
+            if (!t || !t.text) return "";
+            return '<div class="thesis-section"><p class="thesis-text">' + escapeHtml(t.text) + '</p></div>';
+        }
+
+        function renderSnapshot(s) {
+            if (!s) return "";
+            var items = [
+                { label: "Market Cap", value: fmtB(s.market_cap) },
+                { label: "Enterprise Value", value: fmtB(s.enterprise_value) },
+                { label: "Shares Outstanding", value: fmtNum(s.shares_outstanding) },
+                { label: "52-Week Range", value: fmtUSD(s.range_52w_low) + " \u2013 " + fmtUSD(s.range_52w_high) },
+                { label: "Avg Volume (3M)", value: fmtNum(s.avg_volume_3m) },
+                { label: "Dividend Yield", value: fmtPctReport(s.dividend_yield) },
+                { label: "Beta", value: fmtX(s.beta) },
+                { label: "Short Interest", value: fmtPctReport(s.short_interest_pct) }
+            ];
+            var html = '<div class="snapshot-grid">';
+            for (var i = 0; i < items.length; i++) {
+                html += '<div class="snapshot-item"><span class="snapshot-label">' + items[i].label + '</span><span class="snapshot-value">' + items[i].value + '</span></div>';
+            }
+            html += '</div>';
+            return html;
+        }
+
+        function renderFinTable(title, sectionId, headers, rows, options) {
+            options = options || {};
+            var html = '<div class="fin-table-wrapper">';
+            if (title) html += '<h4>' + escapeHtml(title) + '</h4>';
+            html += '<table class="fin-table">';
+            html += '<thead><tr><th></th>';
+            for (var h = 0; h < headers.length; h++) {
+                html += '<th>' + escapeHtml(String(headers[h])) + '</th>';
+            }
+            html += '</tr></thead><tbody>';
+            for (var r = 0; r < rows.length; r++) {
+                var row = rows[r];
+                var cls = "";
+                if (row.type === "header") cls = "row-header";
+                else if (row.type === "subtotal") cls = "row-subtotal";
+                else if (row.type === "pct") cls = "row-pct";
+                html += '<tr class="' + cls + '"><td>' + escapeHtml(row.label) + '</td>';
+                var vals = row.values || [];
+                for (var v = 0; v < headers.length; v++) {
+                    html += '<td>' + (v < vals.length ? formatCellValue(vals[v], row.format) : "\u2014") + '</td>';
+                }
+                html += '</tr>';
+            }
+            html += '</tbody></table></div>';
+            return html;
+        }
+
+        function formatCellValue(val, format) {
+            if (val == null) return "\u2014";
+            if (format === "pct") return fmtPctReport(val);
+            if (format === "usd") return fmtUSD(val);
+            if (format === "millions") return fmtM(val);
+            if (format === "billions") return fmtB(val);
+            if (format === "x") return fmtX(val);
+            if (typeof val === "number") {
+                if (Math.abs(val) >= 1e9) return fmtB(val);
+                if (Math.abs(val) >= 1e6) return fmtM(val);
+                if (Math.abs(val) < 1 && val !== 0) return fmtPctReport(val);
+                return fmtNum(val);
+            }
+            return escapeHtml(String(val));
+        }
+
+        function renderIncomeStatement(data) {
+            if (!data || data.length === 0) return "";
+            var headers = data.map(function (d) { return d.year; });
+            var rows = [
+                { label: "Revenue", values: data.map(function (d) { return d.revenue; }), type: "header", format: "millions" },
+                { label: "YoY Growth", values: data.map(function (d) { return d.yoy_growth; }), type: "pct", format: "pct" },
+                { label: "COGS", values: data.map(function (d) { return d.cogs; }), format: "millions" },
+                { label: "Gross Profit", values: data.map(function (d) { return d.gross_profit; }), type: "subtotal", format: "millions" },
+                { label: "Gross Margin", values: data.map(function (d) { return d.gross_margin; }), type: "pct", format: "pct" },
+                { label: "R&D Expense", values: data.map(function (d) { return d.rd_expense; }), format: "millions" },
+                { label: "SG&A Expense", values: data.map(function (d) { return d.sga_expense; }), format: "millions" },
+                { label: "Operating Income", values: data.map(function (d) { return d.operating_income; }), type: "subtotal", format: "millions" },
+                { label: "Operating Margin", values: data.map(function (d) { return d.operating_margin; }), type: "pct", format: "pct" },
+                { label: "Interest Expense", values: data.map(function (d) { return d.interest_expense; }), format: "millions" },
+                { label: "Pre-Tax Income", values: data.map(function (d) { return d.pretax_income; }), format: "millions" },
+                { label: "Tax Expense", values: data.map(function (d) { return d.tax_expense; }), format: "millions" },
+                { label: "Tax Rate", values: data.map(function (d) { return d.tax_rate; }), type: "pct", format: "pct" },
+                { label: "Net Income", values: data.map(function (d) { return d.net_income; }), type: "subtotal", format: "millions" },
+                { label: "Net Margin", values: data.map(function (d) { return d.net_margin; }), type: "pct", format: "pct" },
+                { label: "Diluted EPS", values: data.map(function (d) { return d.diluted_eps; }), format: "usd" },
+                { label: "EBITDA", values: data.map(function (d) { return d.ebitda; }), type: "subtotal", format: "millions" },
+                { label: "EBITDA Margin", values: data.map(function (d) { return d.ebitda_margin; }), type: "pct", format: "pct" },
+                { label: "Stock-Based Comp", values: data.map(function (d) { return d.sbc; }), format: "millions" }
+            ];
+            return renderFinTable(null, "income", headers, rows);
+        }
+
+        function renderBalanceSheet(data) {
+            if (!data || data.length === 0) return "";
+            var headers = data.map(function (d) { return d.year; });
+            var rows = [
+                { label: "Cash & Equivalents", values: data.map(function (d) { return d.cash; }), format: "millions" },
+                { label: "Receivables", values: data.map(function (d) { return d.receivables; }), format: "millions" },
+                { label: "Inventory", values: data.map(function (d) { return d.inventory; }), format: "millions" },
+                { label: "Total Current Assets", values: data.map(function (d) { return d.total_current_assets; }), type: "subtotal", format: "millions" },
+                { label: "PP&E (Net)", values: data.map(function (d) { return d.ppe_net; }), format: "millions" },
+                { label: "Goodwill", values: data.map(function (d) { return d.goodwill; }), format: "millions" },
+                { label: "Total Assets", values: data.map(function (d) { return d.total_assets; }), type: "header", format: "millions" },
+                { label: "Accounts Payable", values: data.map(function (d) { return d.accounts_payable; }), format: "millions" },
+                { label: "Short-Term Debt", values: data.map(function (d) { return d.short_term_debt; }), format: "millions" },
+                { label: "Total Current Liabilities", values: data.map(function (d) { return d.total_current_liabilities; }), type: "subtotal", format: "millions" },
+                { label: "Long-Term Debt", values: data.map(function (d) { return d.long_term_debt; }), format: "millions" },
+                { label: "Total Liabilities", values: data.map(function (d) { return d.total_liabilities; }), type: "subtotal", format: "millions" },
+                { label: "Total Equity", values: data.map(function (d) { return d.total_equity; }), type: "header", format: "millions" },
+                { label: "Book Value / Share", values: data.map(function (d) { return d.book_value_per_share; }), format: "usd" }
+            ];
+            return renderFinTable(null, "balance", headers, rows);
+        }
+
+        function renderCapitalStructure(data) {
+            if (!data) return "";
+            var rows = [
+                { label: "Net Debt", values: [data.net_debt], format: "millions" },
+                { label: "Net Debt / EBITDA", values: [data.net_debt_ebitda], format: "x" },
+                { label: "Debt / Equity", values: [data.debt_to_equity], format: "x" },
+                { label: "Interest Coverage", values: [data.interest_coverage], format: "x" },
+                { label: "Current Ratio", values: [data.current_ratio], format: "x" },
+                { label: "Quick Ratio", values: [data.quick_ratio], format: "x" }
+            ];
+            return renderFinTable(null, "capital", ["Current"], rows);
+        }
+
+        function renderCashFlow(data) {
+            if (!data || data.length === 0) return "";
+            var headers = data.map(function (d) { return d.year; });
+            var rows = [
+                { label: "Net Income", values: data.map(function (d) { return d.net_income; }), format: "millions" },
+                { label: "D&A", values: data.map(function (d) { return d.dna; }), format: "millions" },
+                { label: "Stock-Based Comp", values: data.map(function (d) { return d.sbc; }), format: "millions" },
+                { label: "Working Capital Change", values: data.map(function (d) { return d.working_capital_change; }), format: "millions" },
+                { label: "Cash from Operations", values: data.map(function (d) { return d.cfo; }), type: "subtotal", format: "millions" },
+                { label: "Capital Expenditures", values: data.map(function (d) { return d.capex; }), format: "millions" },
+                { label: "Acquisitions", values: data.map(function (d) { return d.acquisitions; }), format: "millions" },
+                { label: "Cash from Investing", values: data.map(function (d) { return d.cfi; }), type: "subtotal", format: "millions" },
+                { label: "Debt Issuance / (Repayment)", values: data.map(function (d) { return d.debt_change; }), format: "millions" },
+                { label: "Share Buybacks", values: data.map(function (d) { return d.buybacks; }), format: "millions" },
+                { label: "Dividends Paid", values: data.map(function (d) { return d.dividends; }), format: "millions" },
+                { label: "Cash from Financing", values: data.map(function (d) { return d.cff; }), type: "subtotal", format: "millions" },
+                { label: "Free Cash Flow", values: data.map(function (d) { return d.fcf; }), type: "header", format: "millions" },
+                { label: "FCF Margin", values: data.map(function (d) { return d.fcf_margin; }), type: "pct", format: "pct" },
+                { label: "FCF Yield", values: data.map(function (d) { return d.fcf_yield; }), type: "pct", format: "pct" },
+                { label: "FCF / Share", values: data.map(function (d) { return d.fcf_per_share; }), format: "usd" }
+            ];
+            return renderFinTable(null, "cashflow", headers, rows);
+        }
+
+        function renderDCF(dcf) {
+            if (!dcf) return "";
+            var html = "";
+
+            // Assumptions
+            if (dcf.assumptions) {
+                var a = dcf.assumptions;
+                var aRows = [
+                    { label: "Projection Years", values: [a.projection_years] },
+                    { label: "Revenue CAGR", values: [a.revenue_cagr], format: "pct" },
+                    { label: "Terminal EBITDA Margin", values: [a.terminal_ebitda_margin], format: "pct" },
+                    { label: "Tax Rate", values: [a.tax_rate], format: "pct" },
+                    { label: "D&A (% Rev)", values: [a.dna_pct_rev], format: "pct" },
+                    { label: "CapEx (% Rev)", values: [a.capex_pct_rev], format: "pct" },
+                    { label: "NWC (% \u0394 Rev)", values: [a.nwc_pct_delta_rev], format: "pct" },
+                    { label: "WACC", values: [a.wacc], format: "pct" },
+                    { label: "Terminal Growth", values: [a.terminal_growth], format: "pct" },
+                    { label: "Terminal Method", values: [a.terminal_method] }
+                ];
+                html += renderFinTable("Key Assumptions", "dcf-assumptions", ["Value"], aRows);
+            }
+
+            // WACC Build
+            if (dcf.wacc_build) {
+                var w = dcf.wacc_build;
+                var wRows = [
+                    { label: "Risk-Free Rate", values: [w.risk_free_rate], format: "pct" },
+                    { label: "Equity Risk Premium", values: [w.erp], format: "pct" },
+                    { label: "Beta", values: [w.beta], format: "x" },
+                    { label: "Cost of Equity", values: [w.cost_of_equity], type: "subtotal", format: "pct" },
+                    { label: "Pre-Tax Cost of Debt", values: [w.pretax_cost_of_debt], format: "pct" },
+                    { label: "After-Tax Cost of Debt", values: [w.after_tax_cost_of_debt], format: "pct" },
+                    { label: "Debt Weight", values: [w.debt_weight], format: "pct" },
+                    { label: "Equity Weight", values: [w.equity_weight], format: "pct" },
+                    { label: "WACC", values: [w.wacc], type: "header", format: "pct" }
+                ];
+                html += renderFinTable("WACC Build-Up", "dcf-wacc", ["Value"], wRows);
+            }
+
+            // Projected UFCF
+            if (dcf.projected_ufcf && dcf.projected_ufcf.length > 0) {
+                var proj = dcf.projected_ufcf;
+                var pHeaders = proj.map(function (p) { return p.year; });
+                var pRows = [
+                    { label: "Revenue", values: proj.map(function (p) { return p.revenue; }), type: "header", format: "millions" },
+                    { label: "Rev Growth", values: proj.map(function (p) { return p.rev_growth; }), type: "pct", format: "pct" },
+                    { label: "EBITDA", values: proj.map(function (p) { return p.ebitda; }), format: "millions" },
+                    { label: "EBITDA Margin", values: proj.map(function (p) { return p.ebitda_margin; }), type: "pct", format: "pct" },
+                    { label: "D&A", values: proj.map(function (p) { return p.dna; }), format: "millions" },
+                    { label: "EBIT", values: proj.map(function (p) { return p.ebit; }), format: "millions" },
+                    { label: "Taxes", values: proj.map(function (p) { return p.taxes; }), format: "millions" },
+                    { label: "NOPAT", values: proj.map(function (p) { return p.nopat; }), type: "subtotal", format: "millions" },
+                    { label: "CapEx", values: proj.map(function (p) { return p.capex; }), format: "millions" },
+                    { label: "NWC Change", values: proj.map(function (p) { return p.nwc_change; }), format: "millions" },
+                    { label: "Unlevered FCF", values: proj.map(function (p) { return p.ufcf; }), type: "header", format: "millions" }
+                ];
+                html += renderFinTable("Projected Unlevered Free Cash Flow", "dcf-ufcf", pHeaders, pRows);
+            }
+
+            // DCF Output
+            if (dcf.output) {
+                var o = dcf.output;
+                var oRows = [
+                    { label: "PV of FCFs", values: [o.pv_fcfs], format: "millions" },
+                    { label: "PV of Terminal Value", values: [o.pv_terminal], format: "millions" },
+                    { label: "Terminal % of Total", values: [o.terminal_pct_of_total], type: "pct", format: "pct" },
+                    { label: "Implied Enterprise Value", values: [o.implied_ev], type: "subtotal", format: "millions" },
+                    { label: "Less: Net Debt", values: [o.net_debt], format: "millions" },
+                    { label: "Plus: Cash", values: [o.cash], format: "millions" },
+                    { label: "Implied Equity Value", values: [o.implied_equity_value], type: "subtotal", format: "millions" },
+                    { label: "Shares Outstanding", values: [o.shares], format: "millions" },
+                    { label: "Implied Price / Share", values: [o.implied_price], type: "header", format: "usd" },
+                    { label: "Current Price", values: [o.current_price], format: "usd" },
+                    { label: "Upside / (Downside)", values: [o.upside_pct], type: "pct", format: "pct" }
+                ];
+                html += renderFinTable("DCF Output", "dcf-output", ["Value"], oRows);
+            }
+
+            // Sensitivity matrix
+            if (dcf.sensitivity) {
+                html += renderSensitivityMatrix(dcf.sensitivity, dcf.output ? dcf.output.current_price : null);
+            }
+
+            return html;
+        }
+
+        function renderSensitivityMatrix(sens, currentPrice) {
+            if (!sens || !sens.matrix) return "";
+            var waccVals = sens.wacc_values || [];
+            var growthVals = sens.growth_values || [];
+            var matrix = sens.matrix || [];
+            var midRow = Math.floor(matrix.length / 2);
+            var midCol = Math.floor(waccVals.length / 2);
+
+            var html = '<h4>Sensitivity Analysis (WACC vs Terminal Growth)</h4>';
+            html += '<div class="fin-table-wrapper"><table class="fin-table sensitivity-grid">';
+            html += '<thead><tr><th>WACC \\ g</th>';
+            for (var g = 0; g < growthVals.length; g++) {
+                html += '<th>' + fmtPctReport(growthVals[g]) + '</th>';
+            }
+            html += '</tr></thead><tbody>';
+            for (var r = 0; r < matrix.length; r++) {
+                html += '<tr><td class="row-header">' + fmtPctReport(waccVals[r]) + '</td>';
+                for (var c = 0; c < matrix[r].length; c++) {
+                    var val = matrix[r][c];
+                    var cellClass = "";
+                    if (currentPrice != null) {
+                        cellClass = val > currentPrice ? "positive" : "negative";
+                    }
+                    if (r === midRow && c === midCol) cellClass += " base-case";
+                    html += '<td class="' + cellClass.trim() + '">' + fmtUSD(val) + '</td>';
+                }
+                html += '</tr>';
+            }
+            html += '</tbody></table></div>';
+            return html;
+        }
+
+        function renderComps(comps) {
+            if (!comps) return "";
+            var html = "";
+
+            // Peer comparison table
+            if (comps.peers && comps.peers.length > 0) {
+                var compHeaders = ["Company", "Ticker", "EV", "EV/Rev", "EV/EBITDA", "P/E (Fwd)", "PEG", "Rev Growth", "EBITDA Margin", "Net Margin", "ROIC"];
+                html += '<div class="fin-table-wrapper"><table class="fin-table comps-table">';
+                html += '<thead><tr>';
+                for (var h = 0; h < compHeaders.length; h++) {
+                    html += '<th>' + compHeaders[h] + '</th>';
+                }
+                html += '</tr></thead><tbody>';
+
+                // Peer rows
+                for (var p = 0; p < comps.peers.length; p++) {
+                    html += compRow(comps.peers[p], "");
+                }
+                // Peer median
+                if (comps.peer_median) {
+                    html += compRow(comps.peer_median, "peer-median-row");
+                }
+                // Subject
+                if (comps.subject) {
+                    html += compRow(comps.subject, "subject-row");
+                }
+                // Premium/discount
+                if (comps.premium_discount) {
+                    var pd = comps.premium_discount;
+                    html += '<tr class="premium-discount-row">';
+                    html += '<td colspan="3">Premium / (Discount)</td>';
+                    html += '<td>' + fmtPctReport(pd.ev_revenue) + '</td>';
+                    html += '<td>' + fmtPctReport(pd.ev_ebitda) + '</td>';
+                    html += '<td>' + fmtPctReport(pd.pe) + '</td>';
+                    html += '<td></td><td></td><td></td><td></td>';
+                    html += '<td>' + fmtPctReport(pd.roic) + '</td>';
+                    html += '</tr>';
+                }
+
+                html += '</tbody></table></div>';
+            }
+
+            // Implied valuation sub-table
+            if (comps.implied_valuation && comps.implied_valuation.length > 0) {
+                var ivHeaders = ["Method", "Peer Median", "Subject Metric", "Implied EV", "Implied Price"];
+                html += '<h4>Implied Valuation from Comps</h4>';
+                html += '<div class="fin-table-wrapper"><table class="fin-table">';
+                html += '<thead><tr>';
+                for (var ih = 0; ih < ivHeaders.length; ih++) {
+                    html += '<th>' + ivHeaders[ih] + '</th>';
+                }
+                html += '</tr></thead><tbody>';
+                for (var iv = 0; iv < comps.implied_valuation.length; iv++) {
+                    var row = comps.implied_valuation[iv];
+                    html += '<tr>';
+                    html += '<td>' + escapeHtml(row.method || "") + '</td>';
+                    html += '<td>' + fmtX(row.peer_median) + '</td>';
+                    html += '<td>' + fmtM(row.subject_metric) + '</td>';
+                    html += '<td>' + fmtM(row.implied_ev) + '</td>';
+                    html += '<td>' + fmtUSD(row.implied_price) + '</td>';
+                    html += '</tr>';
+                }
+                html += '</tbody></table></div>';
+            }
+
+            return html;
+        }
+
+        function compRow(peer, cls) {
+            var html = '<tr class="' + cls + '">';
+            html += '<td>' + escapeHtml(peer.name || "") + '</td>';
+            html += '<td>' + escapeHtml(peer.ticker || "") + '</td>';
+            html += '<td>' + fmtB(peer.ev) + '</td>';
+            html += '<td>' + fmtX(peer.ev_revenue) + '</td>';
+            html += '<td>' + fmtX(peer.ev_ebitda) + '</td>';
+            html += '<td>' + fmtX(peer.pe_fwd) + '</td>';
+            html += '<td>' + fmtX(peer.peg) + '</td>';
+            html += '<td>' + fmtPctReport(peer.rev_growth) + '</td>';
+            html += '<td>' + fmtPctReport(peer.ebitda_margin) + '</td>';
+            html += '<td>' + fmtPctReport(peer.net_margin) + '</td>';
+            html += '<td>' + fmtPctReport(peer.roic) + '</td>';
+            html += '</tr>';
+            return html;
+        }
+
+        function renderProfitability(p) {
+            if (!p) return "";
+            var items = [
+                { label: "ROE", value: fmtPctReport(p.roe) },
+                { label: "ROA", value: fmtPctReport(p.roa) },
+                { label: "ROIC", value: fmtPctReport(p.roic) },
+                { label: "Asset Turnover", value: fmtX(p.asset_turnover) },
+                { label: "Inventory Turnover", value: fmtX(p.inventory_turnover) },
+                { label: "DSO", value: p.dso != null ? Math.round(p.dso) + " days" : "\u2014" },
+                { label: "DPO", value: p.dpo != null ? Math.round(p.dpo) + " days" : "\u2014" },
+                { label: "Cash Conversion Cycle", value: p.cash_conversion_cycle != null ? Math.round(p.cash_conversion_cycle) + " days" : "\u2014" }
+            ];
+            var html = '<div class="snapshot-grid">';
+            for (var i = 0; i < items.length; i++) {
+                html += '<div class="snapshot-item"><span class="snapshot-label">' + items[i].label + '</span><span class="snapshot-value">' + items[i].value + '</span></div>';
+            }
+            html += '</div>';
+            return html;
+        }
+
+        function renderCatalysts(c) {
+            if (!c || c.length === 0) return "";
+            var html = '<div class="fin-table-wrapper"><table class="fin-table">';
+            html += '<thead><tr><th>Date</th><th>Event</th><th>Impact</th></tr></thead><tbody>';
+            for (var i = 0; i < c.length; i++) {
+                html += '<tr>';
+                html += '<td>' + escapeHtml(c[i].date || "") + '</td>';
+                html += '<td>' + escapeHtml(c[i].event || "") + '</td>';
+                html += '<td>' + escapeHtml(c[i].impact || "") + '</td>';
+                html += '</tr>';
+            }
+            html += '</tbody></table></div>';
+            return html;
+        }
+
+        function renderMoat(m) {
+            if (!m) return "";
+            var ratingClass = (m.rating || "none").toLowerCase();
+            var html = '<div class="moat-rating ' + ratingClass + '">' + escapeHtml(m.rating || "None") + ' Moat</div>';
+            if (m.description) html += '<p>' + escapeHtml(m.description) + '</p>';
+            if (m.tam || m.market_share) {
+                html += '<div class="snapshot-grid">';
+                if (m.tam) html += '<div class="snapshot-item"><span class="snapshot-label">TAM</span><span class="snapshot-value">' + fmtB(m.tam) + '</span></div>';
+                if (m.market_share) html += '<div class="snapshot-item"><span class="snapshot-label">Market Share</span><span class="snapshot-value">' + fmtPctReport(m.market_share) + '</span></div>';
+                html += '</div>';
+            }
+            return html;
+        }
+
+        function renderRisks(risks) {
+            if (!risks || risks.length === 0) return "";
+            var html = '<div class="fin-table-wrapper"><table class="fin-table">';
+            html += '<thead><tr><th>Factor</th><th>Severity</th><th>Probability</th><th>Detail</th></tr></thead><tbody>';
+            for (var i = 0; i < risks.length; i++) {
+                var r = risks[i];
+                var sevClass = (r.severity || "").toLowerCase();
+                var probClass = (r.probability || "").toLowerCase();
+                html += '<tr>';
+                html += '<td>' + escapeHtml(r.factor || "") + '</td>';
+                html += '<td><span class="risk-badge ' + sevClass + '">' + escapeHtml(r.severity || "") + '</span></td>';
+                html += '<td><span class="risk-badge ' + probClass + '">' + escapeHtml(r.probability || "") + '</span></td>';
+                html += '<td>' + escapeHtml(r.detail || "") + '</td>';
+                html += '</tr>';
+            }
+            html += '</tbody></table></div>';
+            return html;
+        }
+
+        function renderViewChangers(vc) {
+            if (!vc) return "";
+            var html = "";
+            if (vc.bullish && vc.bullish.length > 0) {
+                html += '<ul class="trigger-list bullish">';
+                for (var i = 0; i < vc.bullish.length; i++) {
+                    html += '<li>&#9650; ' + escapeHtml(vc.bullish[i]) + '</li>';
+                }
+                html += '</ul>';
+            }
+            if (vc.bearish && vc.bearish.length > 0) {
+                html += '<ul class="trigger-list bearish">';
+                for (var i = 0; i < vc.bearish.length; i++) {
+                    html += '<li>&#9660; ' + escapeHtml(vc.bearish[i]) + '</li>';
+                }
+                html += '</ul>';
+            }
+            return html;
+        }
+
+        function renderPriceTarget(pt) {
+            if (!pt) return "";
+            var rows = [
+                { label: "DCF", weight: pt.dcf_weight, value: pt.dcf_value },
+                { label: "Comps", weight: pt.comps_weight, value: pt.comps_value },
+                { label: "Technical", weight: pt.technical_weight, value: pt.technical_value }
+            ];
+
+            var html = '<div class="fin-table-wrapper"><table class="fin-table">';
+            html += '<thead><tr><th>Method</th><th>Weight</th><th>Value</th><th>Contribution</th></tr></thead><tbody>';
+            for (var i = 0; i < rows.length; i++) {
+                var r = rows[i];
+                var contribution = (r.weight != null && r.value != null) ? r.weight * r.value : null;
+                html += '<tr>';
+                html += '<td>' + r.label + '</td>';
+                html += '<td>' + fmtPctReport(r.weight) + '</td>';
+                html += '<td>' + fmtUSD(r.value) + '</td>';
+                html += '<td>' + fmtUSD(contribution) + '</td>';
+                html += '</tr>';
+            }
+            html += '<tr class="row-subtotal"><td>Blended Target</td><td></td><td></td><td>' + fmtUSD(pt.blended) + '</td></tr>';
+            html += '</tbody></table></div>';
+
+            // Visual weight bar
+            html += '<div class="pt-bar">';
+            for (var j = 0; j < rows.length; j++) {
+                var widthPct = (rows[j].weight || 0) * 100;
+                if (widthPct > 0) {
+                    html += '<div class="pt-bar-segment" style="width:' + widthPct + '%" title="' + rows[j].label + ': ' + fmtPctReport(rows[j].weight) + '">' + rows[j].label + '</div>';
+                }
+            }
+            html += '</div>';
+
+            return html;
+        }
+
+        function renderVerdict(v) {
+            if (!v) return "";
+            var ratingClass = (v.rating || "").toLowerCase().replace(/\s+/g, "-");
+            var html = '<div class="verdict-box">';
+            html += '<div class="verdict-rating ' + ratingClass + '">' + escapeHtml(v.rating || "") + '</div>';
+            html += '<div class="verdict-target">Price Target: ' + fmtUSD(v.price_target) + '</div>';
+            if (v.confidence != null) {
+                html += '<div class="verdict-confidence">Confidence: ' + fmtPctReport(v.confidence) + '</div>';
+            }
+            if (v.summary) {
+                html += '<p class="verdict-summary">' + escapeHtml(v.summary) + '</p>';
+            }
+            html += '</div>';
+            return html;
+        }
+
+        // ── Report formatting helpers ────────────────────────────
+
+        function fmtM(n) {
+            if (n == null) return "\u2014";
+            return "$" + (n / 1e6).toLocaleString(undefined, { maximumFractionDigits: 1 }) + "M";
+        }
+
+        function fmtB(n) {
+            if (n == null) return "\u2014";
+            if (Math.abs(n) >= 1e12) return "$" + (n / 1e12).toLocaleString(undefined, { maximumFractionDigits: 1 }) + "T";
+            return "$" + (n / 1e9).toLocaleString(undefined, { maximumFractionDigits: 1 }) + "B";
+        }
+
+        function fmtPctReport(n) {
+            if (n == null) return "\u2014";
+            // If value is between -1 and 1, treat as decimal (e.g. 0.152 -> 15.2%)
+            // If outside that range, treat as already a percentage (e.g. 15.2 -> 15.2%)
+            var pct = (Math.abs(n) <= 1 && n !== 0) ? n * 100 : n;
+            return pct.toFixed(1) + "%";
+        }
+
+        function fmtX(n) {
+            if (n == null) return "\u2014";
+            return Number(n).toFixed(1) + "x";
+        }
+
+        function fmtUSD(n) {
+            if (n == null) return "\u2014";
+            return "$" + Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        function fmtNum(n) {
+            if (n == null) return "\u2014";
+            return Number(n).toLocaleString();
         }
 
         // ── Screened stock detail ──────────────────────────────
@@ -430,4 +1057,17 @@
         div.appendChild(document.createTextNode(str));
         return div.innerHTML;
     }
+
+    // ── Global toggle for report sections (called from onclick) ──
+
+    window.toggleSection = function (id) {
+        var body = document.getElementById("body-" + id);
+        var section = document.getElementById("section-" + id);
+        if (!body || !section) return;
+        body.classList.toggle("collapsed");
+        var chevron = section.querySelector(".chevron");
+        if (chevron) {
+            chevron.style.transform = body.classList.contains("collapsed") ? "rotate(0deg)" : "rotate(90deg)";
+        }
+    };
 })();
