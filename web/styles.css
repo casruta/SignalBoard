@@ -320,6 +320,301 @@ body[data-page="list"] {
   font-style: italic;
 }
 
+/* ── Wide overlay variant ────────────────────────────────── */
+
+.overlay-panel--wide {
+  max-width: 680px;
+  padding: 3rem 2.5rem 2rem;
+  max-height: 90vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule) transparent;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.overlay-panel--wide::-webkit-scrollbar {
+  width: 4px;
+}
+
+.overlay-panel--wide::-webkit-scrollbar-thumb {
+  background: var(--rule);
+  border-radius: 2px;
+}
+
+/* ── Methodology sections ────────────────────────────────── */
+
+.meth-section {
+  margin-bottom: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--rule);
+}
+
+.meth-section:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.meth-heading {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 1.2rem;
+}
+
+/* ── Pipeline flow ───────────────────────────────────────── */
+
+.pipeline {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+.pipeline-node {
+  width: 100%;
+  max-width: 480px;
+}
+
+.pipeline-card {
+  background: #fff;
+  border: 1px solid rgba(212, 208, 200, 0.5);
+  border-radius: 3px;
+  padding: 12px 16px;
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.04),
+    0 4px 12px rgba(0, 0, 0, 0.03);
+  position: relative;
+  overflow: hidden;
+}
+
+.pipeline-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 3px;
+  height: 0;
+  background: var(--fg);
+}
+
+.overlay.open .pipeline-card::before {
+  animation: accent-grow 0.8s ease forwards;
+}
+
+@keyframes accent-grow {
+  to { height: 100%; }
+}
+
+.pipeline-label {
+  display: block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--fg);
+  margin-bottom: 2px;
+}
+
+.pipeline-desc {
+  display: block;
+  font-size: 0.68rem;
+  color: var(--muted);
+  line-height: 1.6;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.pipeline-connector {
+  width: 1px;
+  height: 20px;
+  background: var(--rule);
+}
+
+/* ── Scoring dimensions ──────────────────────────────────── */
+
+.dim-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dim-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+
+.dim-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  font-weight: 300;
+  color: var(--fg);
+}
+
+.dim-weight {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--fg);
+  min-width: 32px;
+  text-align: right;
+}
+
+.dim-track {
+  height: 3px;
+  background: var(--rule);
+  border-radius: 1.5px;
+  overflow: hidden;
+  margin-bottom: 3px;
+}
+
+.dim-fill {
+  height: 100%;
+  background: var(--fg);
+  border-radius: 1.5px;
+  width: 0;
+  transition: width 0.8s ease;
+}
+
+.dim-desc {
+  font-size: 0.62rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* ── Safety filter funnel ────────────────────────────────── */
+
+.funnel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+.funnel-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(212, 208, 200, 0.3);
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.funnel-row--0 { width: 100%; background: rgba(26, 26, 26, 0.03); }
+.funnel-row--1 { width: 85%;  background: rgba(26, 26, 26, 0.04); }
+.funnel-row--2 { width: 68%;  background: rgba(26, 26, 26, 0.05); }
+.funnel-row--3 { width: 52%;  background: rgba(26, 26, 26, 0.06); }
+.funnel-row--4 {
+  width: 36%;
+  background: rgba(26, 26, 26, 0.08);
+  border: 1px solid var(--fg);
+  border-radius: 2px;
+}
+
+.funnel-row:hover {
+  background: rgba(212, 208, 200, 0.08);
+}
+
+.funnel-count {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--fg);
+  min-width: 48px;
+  text-align: right;
+}
+
+.funnel-label {
+  font-size: 0.68rem;
+  color: var(--muted);
+  flex: 1;
+}
+
+/* ── Regime indicator ────────────────────────────────────── */
+
+.regime-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.regime-card {
+  background: #fff;
+  border: 1px solid rgba(212, 208, 200, 0.5);
+  border-radius: 3px;
+  padding: 16px;
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.04),
+    0 4px 12px rgba(0, 0, 0, 0.03);
+  position: relative;
+  overflow: hidden;
+}
+
+.regime-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 3px;
+  height: 0;
+  background: var(--fg);
+}
+
+.overlay.open .regime-card::before {
+  animation: accent-grow 0.8s ease forwards;
+}
+
+.regime-tag {
+  display: block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg);
+  margin-bottom: 2px;
+}
+
+.regime-condition {
+  display: block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.62rem;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.regime-shifts {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.regime-shift {
+  font-size: 0.65rem;
+  color: var(--fg);
+  line-height: 1.6;
+  padding: 2px 8px;
+  background: rgba(26, 26, 26, 0.03);
+  border-radius: 2px;
+}
+
+/* ── Methodology intro text ──────────────────────────────── */
+
+.meth-intro {
+  font-size: 0.75rem;
+  line-height: 1.8;
+  color: var(--fg);
+  margin-bottom: 1.5rem;
+}
+
 /* ── Animations ───────────────────────────────────────────── */
 
 @keyframes fadeIn {
@@ -346,6 +641,15 @@ body[data-page="list"] {
   .sc-pct { font-size: 0.7rem; }
   .metric-label { font-size: 0.7rem; }
   .metric-value { font-size: 0.7rem; }
+  .overlay-panel--wide { max-width: 95vw; padding: 1.5rem 1rem 1.5rem; overflow-x: hidden; }
+  .pipeline-card { padding: 10px 12px; }
+  .meth-intro { font-size: 0.7rem; }
+  .regime-grid { grid-template-columns: 1fr; }
+  .pipeline-node { max-width: 100%; }
+  .funnel-row--4 { width: 55%; }
+  .funnel-row--3 { width: 65%; }
+  .funnel-row--2 { width: 78%; }
+  .funnel-row--1 { width: 90%; }
 }
 
 /* ── Detail page ──────────────────────────────────────────── */

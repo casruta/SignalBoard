@@ -33,6 +33,30 @@
             });
         });
 
+        // Animate methodology overlay components on open
+        document.querySelectorAll(".nav-btn").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+                var id = btn.getAttribute("data-overlay");
+                if (id === "methodology-overlay") {
+                    setTimeout(function () {
+                        // Animate scoring dimension bars
+                        document.querySelectorAll(".dim-fill").forEach(function (fill) {
+                            var w = fill.getAttribute("data-width");
+                            if (w) fill.style.width = w + "%";
+                        });
+                        // Stagger funnel rows
+                        document.querySelectorAll(".funnel-row").forEach(function (row, i) {
+                            setTimeout(function () {
+                                row.style.transition = "opacity 0.4s ease, transform 0.4s ease";
+                                row.style.opacity = "1";
+                                row.style.transform = "translateY(0)";
+                            }, i * 100);
+                        });
+                    }, 150);
+                }
+            });
+        });
+
         fetchScreenedStocks();
 
         async function fetchScreenedStocks() {

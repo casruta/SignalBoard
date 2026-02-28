@@ -13,6 +13,7 @@
     <button class="nav-btn" data-overlay="project-overlay">About This Project</button>
     <button class="nav-btn" data-overlay="model-overlay">About This Model</button>
     <button class="nav-btn" data-overlay="picks-overlay">Past Picks</button>
+    <button class="nav-btn" data-overlay="methodology-overlay">How It Works</button>
   </nav>
 
   <div class="container" id="ticker-container">
@@ -86,6 +87,187 @@
         Historical picks and their outcomes will appear here once the daily
         pipeline has run for multiple cycles. Check back soon.
       </p>
+    </div>
+  </div>
+
+  <!-- Methodology overlay -->
+  <div class="overlay" id="methodology-overlay">
+    <div class="overlay-panel overlay-panel--wide">
+      <button class="overlay-close">&times;</button>
+      <h2 class="overlay-title">How It Works</h2>
+      <p class="meth-intro">
+        A quantitative pipeline that screens ~3,000 US equities through safety
+        filters, scores them across seven fundamental dimensions, and ranks
+        the survivors using a regime-aware composite model.
+      </p>
+
+      <!-- Pipeline Flow -->
+      <div class="meth-section" style="border-top: none; padding-top: 0;">
+        <h3 class="meth-heading">Pipeline</h3>
+        <div class="pipeline">
+          <div class="pipeline-node">
+            <div class="pipeline-card">
+              <span class="pipeline-label">Universe</span>
+              <span class="pipeline-desc">~3,000 US equities across all sectors and market caps</span>
+            </div>
+          </div>
+          <div class="pipeline-connector"></div>
+          <div class="pipeline-node">
+            <div class="pipeline-card">
+              <span class="pipeline-label">Safety Filters</span>
+              <span class="pipeline-desc">Altman Z &gt; 1.81 &middot; Market cap $300M&ndash;$20B &middot; 2+ quarters of data</span>
+            </div>
+          </div>
+          <div class="pipeline-connector"></div>
+          <div class="pipeline-node">
+            <div class="pipeline-card">
+              <span class="pipeline-label">Feature Engineering</span>
+              <span class="pipeline-desc">100+ signals across 12 categories: technical, fundamental, macro, DCF, microstructure, cross-sectional, calendar, network, statistical, options, interaction, deep fundamentals</span>
+            </div>
+          </div>
+          <div class="pipeline-connector"></div>
+          <div class="pipeline-node">
+            <div class="pipeline-card">
+              <span class="pipeline-label">ML Model</span>
+              <span class="pipeline-desc">LightGBM multiclass classifier (UP / FLAT / DOWN) trained via walk-forward temporal validation with 2-year windows and purge gaps. Isotonic probability calibration.</span>
+            </div>
+          </div>
+          <div class="pipeline-connector"></div>
+          <div class="pipeline-node">
+            <div class="pipeline-card">
+              <span class="pipeline-label">Composite Scoring</span>
+              <span class="pipeline-desc">7-dimension weighted score normalized 0&ndash;100, dynamically adjusted by macro regime (VIX-based risk-on / risk-off)</span>
+            </div>
+          </div>
+          <div class="pipeline-connector"></div>
+          <div class="pipeline-node">
+            <div class="pipeline-card">
+              <span class="pipeline-label">Ranking</span>
+              <span class="pipeline-desc">Top 15 stocks ranked by calibrated composite score. Retrained monthly with vol-scaled thresholds per ticker.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Scoring Dimensions -->
+      <div class="meth-section">
+        <h3 class="meth-heading">Composite Scoring</h3>
+        <div class="dim-list">
+          <div class="dim-row">
+            <div class="dim-header">
+              <span class="dim-name">Piotroski F-Score</span>
+              <span class="dim-weight">18%</span>
+            </div>
+            <div class="dim-track"><div class="dim-fill" data-width="90"></div></div>
+            <span class="dim-desc">Financial strength: profitability, leverage, operating efficiency (0&ndash;9 scale)</span>
+          </div>
+          <div class="dim-row">
+            <div class="dim-header">
+              <span class="dim-name">Cash Flow Quality</span>
+              <span class="dim-weight">18%</span>
+            </div>
+            <div class="dim-track"><div class="dim-fill" data-width="90"></div></div>
+            <span class="dim-desc">Operating cash flow trends, FCF-to-net-income ratio, inverted accruals</span>
+          </div>
+          <div class="dim-row">
+            <div class="dim-header">
+              <span class="dim-name">ROIC Spread</span>
+              <span class="dim-weight">14%</span>
+            </div>
+            <div class="dim-track"><div class="dim-fill" data-width="70"></div></div>
+            <span class="dim-desc">Return on invested capital minus weighted average cost of capital</span>
+          </div>
+          <div class="dim-row">
+            <div class="dim-header">
+              <span class="dim-name">Balance Sheet</span>
+              <span class="dim-weight">14%</span>
+            </div>
+            <div class="dim-track"><div class="dim-fill" data-width="70"></div></div>
+            <span class="dim-desc">Altman Z-score, interest coverage, debt-to-equity, current ratio</span>
+          </div>
+          <div class="dim-row">
+            <div class="dim-header">
+              <span class="dim-name">Blindspot</span>
+              <span class="dim-weight">14%</span>
+            </div>
+            <div class="dim-track"><div class="dim-fill" data-width="70"></div></div>
+            <span class="dim-desc">Low analyst coverage, insider buying clusters, institutional under-ownership</span>
+          </div>
+          <div class="dim-row">
+            <div class="dim-header">
+              <span class="dim-name">DCF Upside</span>
+              <span class="dim-weight">12%</span>
+            </div>
+            <div class="dim-track"><div class="dim-fill" data-width="60"></div></div>
+            <span class="dim-desc">5-year discounted cash flow intrinsic value vs market price, margin of safety</span>
+          </div>
+          <div class="dim-row">
+            <div class="dim-header">
+              <span class="dim-name">Margin Trajectory</span>
+              <span class="dim-weight">10%</span>
+            </div>
+            <div class="dim-track"><div class="dim-fill" data-width="50"></div></div>
+            <span class="dim-desc">4-quarter rolling gross and operating margin trends vs sector peers</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Safety Filter Funnel -->
+      <div class="meth-section">
+        <h3 class="meth-heading">Selection Funnel</h3>
+        <div class="funnel">
+          <div class="funnel-row funnel-row--0">
+            <span class="funnel-count">~3,000</span>
+            <span class="funnel-label">US equities universe</span>
+          </div>
+          <div class="funnel-row funnel-row--1">
+            <span class="funnel-count">~1,800</span>
+            <span class="funnel-label">Market cap $300M &ndash; $20B</span>
+          </div>
+          <div class="funnel-row funnel-row--2">
+            <span class="funnel-count">~900</span>
+            <span class="funnel-label">Altman Z-Score &gt; 1.81</span>
+          </div>
+          <div class="funnel-row funnel-row--3">
+            <span class="funnel-count">~500</span>
+            <span class="funnel-label">2+ quarters of financial data</span>
+          </div>
+          <div class="funnel-row funnel-row--4">
+            <span class="funnel-count">15</span>
+            <span class="funnel-label">Top ranked by composite score</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Regime Indicator -->
+      <div class="meth-section">
+        <h3 class="meth-heading">Regime Awareness</h3>
+        <p class="overlay-text" style="margin-bottom: 1rem;">
+          VIX-based regime detection adjusts dimension weights dynamically.
+          Defensive posture in volatile markets, opportunistic in calm ones.
+        </p>
+        <div class="regime-grid">
+          <div class="regime-card">
+            <span class="regime-tag">Risk-On</span>
+            <span class="regime-condition">VIX &lt; 20</span>
+            <div class="regime-shifts">
+              <span class="regime-shift">&uarr; DCF Upside weight</span>
+              <span class="regime-shift">&uarr; Blindspot weight</span>
+              <span class="regime-shift">&darr; Balance Sheet weight</span>
+            </div>
+          </div>
+          <div class="regime-card">
+            <span class="regime-tag">Risk-Off</span>
+            <span class="regime-condition">VIX &ge; 20</span>
+            <div class="regime-shifts">
+              <span class="regime-shift">&uarr; Balance Sheet weight</span>
+              <span class="regime-shift">&uarr; Cash Flow weight</span>
+              <span class="regime-shift">&darr; DCF Upside weight</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
 
