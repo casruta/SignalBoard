@@ -214,6 +214,7 @@
                 { id: "cashflow", title: "Cash Flow Statement", html: renderCashFlow(data.cash_flow) },
                 { id: "dcf", title: "DCF Valuation", html: renderDCF(data.dcf) },
                 { id: "comps", title: "Comparable Companies", html: renderComps(data.comps) },
+                { id: "impliedval", title: "Implied Valuation from Comps", html: renderImpliedValuation(data.comps) },
                 { id: "profitability", title: "Profitability & Efficiency", html: renderProfitability(data.profitability) },
                 { id: "catalysts", title: "Catalysts & Events", html: renderCatalysts(data.catalysts) },
                 { id: "moat", title: "Competitive Moat", html: renderMoat(data.moat) },
@@ -594,29 +595,29 @@
                 html += '</tbody></table></div>';
             }
 
-            // Implied valuation sub-table
-            if (comps.implied_valuation && comps.implied_valuation.length > 0) {
-                var ivHeaders = ["Method", "Peer Median", "Subject Metric", "Implied EV", "Implied Price"];
-                html += '<h4>Implied Valuation from Comps</h4>';
-                html += '<div class="fin-table-wrapper"><table class="fin-table">';
-                html += '<thead><tr>';
-                for (var ih = 0; ih < ivHeaders.length; ih++) {
-                    html += '<th>' + ivHeaders[ih] + '</th>';
-                }
-                html += '</tr></thead><tbody>';
-                for (var iv = 0; iv < comps.implied_valuation.length; iv++) {
-                    var row = comps.implied_valuation[iv];
-                    html += '<tr>';
-                    html += '<td>' + escapeHtml(row.method || "") + '</td>';
-                    html += '<td>' + fmtX(row.peer_median) + '</td>';
-                    html += '<td>' + fmtM(row.subject_metric) + '</td>';
-                    html += '<td>' + fmtM(row.implied_ev) + '</td>';
-                    html += '<td>' + fmtUSD(row.implied_price) + '</td>';
-                    html += '</tr>';
-                }
-                html += '</tbody></table></div>';
-            }
+            return html;
+        }
 
+        function renderImpliedValuation(comps) {
+            if (!comps || !comps.implied_valuation || comps.implied_valuation.length === 0) return "";
+            var ivHeaders = ["Method", "Peer Median", "Subject Metric", "Implied EV", "Implied Price"];
+            var html = '<div class="fin-table-wrapper"><table class="fin-table">';
+            html += '<thead><tr>';
+            for (var ih = 0; ih < ivHeaders.length; ih++) {
+                html += '<th>' + ivHeaders[ih] + '</th>';
+            }
+            html += '</tr></thead><tbody>';
+            for (var iv = 0; iv < comps.implied_valuation.length; iv++) {
+                var row = comps.implied_valuation[iv];
+                html += '<tr>';
+                html += '<td>' + escapeHtml(row.method || "") + '</td>';
+                html += '<td>' + fmtX(row.peer_median) + '</td>';
+                html += '<td>' + fmtM(row.subject_metric) + '</td>';
+                html += '<td>' + fmtM(row.implied_ev) + '</td>';
+                html += '<td>' + fmtUSD(row.implied_price) + '</td>';
+                html += '</tr>';
+            }
+            html += '</tbody></table></div>';
             return html;
         }
 
