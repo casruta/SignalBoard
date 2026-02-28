@@ -305,7 +305,11 @@ def _moat(sec: str, pio: Optional[int], roic: float, wacc: float) -> dict:
         "Industrials":"$1.2T global","Financials":"$400B alternatives","Materials":"$350B domestic",
         "Consumer Discretionary":"$300B specialty retail","Consumer Staples":"$200B US packaged",
         "Utilities":"$150B US distributed"}
-    return {"rating":r,"description":d,"tam":tams.get(sec,"$200B estimated"),"market_share":"< 3%"}
+    tam_vals = {"Energy":800e9,"Technology":500e9,"Healthcare":600e9,
+        "Industrials":1.2e12,"Financials":400e9,"Materials":350e9,
+        "Consumer Discretionary":300e9,"Consumer Staples":200e9,
+        "Utilities":150e9}
+    return {"rating":r,"description":d,"tam":tam_vals.get(sec,200e9),"market_share":round(random.uniform(0.005,0.03),4)}
 
 
 def generate_mock_report(signal: dict) -> dict:
@@ -382,5 +386,5 @@ def generate_mock_report(signal: dict) -> dict:
         "price_target":{"dcf_weight":0.50,"dcf_value":round(dp,2),"comps_weight":0.30,
             "comps_value":round(ca,2),"technical_weight":0.20,"technical_value":round(tt,2),
             "blended":round(bl,2)},
-        "verdict":{"rating":rat,"price_target":round(bl,2),"confidence":f"{conf:.0%}",
+        "verdict":{"rating":rat,"price_target":round(bl,2),"confidence":round(conf,4),
             "summary":f"{rat} with {bl:.2f} price target ({up:+.1%} upside). {signal.get('ml_insight','')}"}}

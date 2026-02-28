@@ -780,36 +780,36 @@
         // ── Report formatting helpers ────────────────────────────
 
         function fmtM(n) {
-            if (n == null) return "\u2014";
+            if (n == null || typeof n === "string" || isNaN(n)) return typeof n === "string" ? escapeHtml(n) : "\u2014";
             return "$" + (n / 1e6).toLocaleString(undefined, { maximumFractionDigits: 1 }) + "M";
         }
 
         function fmtB(n) {
-            if (n == null) return "\u2014";
+            if (n == null || typeof n === "string" || isNaN(n)) return typeof n === "string" ? escapeHtml(n) : "\u2014";
             if (Math.abs(n) >= 1e12) return "$" + (n / 1e12).toLocaleString(undefined, { maximumFractionDigits: 1 }) + "T";
             return "$" + (n / 1e9).toLocaleString(undefined, { maximumFractionDigits: 1 }) + "B";
         }
 
         function fmtPctReport(n) {
             if (n == null) return "\u2014";
-            // If value is between -1 and 1, treat as decimal (e.g. 0.152 -> 15.2%)
-            // If outside that range, treat as already a percentage (e.g. 15.2 -> 15.2%)
+            if (typeof n === "string") return escapeHtml(n);
+            if (isNaN(n)) return "\u2014";
             var pct = (Math.abs(n) <= 1 && n !== 0) ? n * 100 : n;
             return pct.toFixed(1) + "%";
         }
 
         function fmtX(n) {
-            if (n == null) return "\u2014";
+            if (n == null || typeof n === "string" || isNaN(n)) return typeof n === "string" ? escapeHtml(n) : "\u2014";
             return Number(n).toFixed(1) + "x";
         }
 
         function fmtUSD(n) {
-            if (n == null) return "\u2014";
+            if (n == null || typeof n === "string" || isNaN(n)) return typeof n === "string" ? escapeHtml(n) : "\u2014";
             return "$" + Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         }
 
         function fmtNum(n) {
-            if (n == null) return "\u2014";
+            if (n == null || typeof n === "string" || isNaN(n)) return typeof n === "string" ? escapeHtml(n) : "\u2014";
             return Number(n).toLocaleString();
         }
 
