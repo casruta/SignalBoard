@@ -490,7 +490,9 @@
                     { label: "Revenue CAGR", values: [a.revenue_cagr], format: "pct" },
                     { label: "Terminal EBITDA Margin", values: [a.terminal_ebitda_margin], format: "pct" }
                 ];
+                html += '<div class="dcf-sub-table">';
                 html += renderFinTable("Assumptions", "dcf-assumptions", ["Value"], aRows);
+                html += '</div>';
             }
 
             // DCF Output — the money numbers
@@ -503,12 +505,16 @@
                     { label: "Implied Price / Share", values: [o.implied_price], type: "header", format: "usd" },
                     { label: "Upside / (Downside)", values: [o.upside_pct], type: "pct", format: "pct" }
                 ];
+                html += '<div class="dcf-sub-table">';
                 html += renderFinTable("Valuation Output", "dcf-output", ["Value"], oRows);
+                html += '</div>';
             }
 
-            // Sensitivity matrix — always show, it's the most actionable part
+            // Sensitivity matrix — separate heading with clear visual break
             if (dcf.sensitivity) {
+                html += '<div class="sensitivity-wrapper">';
                 html += renderSensitivityMatrix(dcf.sensitivity, dcf.output ? dcf.output.current_price : null);
+                html += '</div>';
             }
 
             return html;
