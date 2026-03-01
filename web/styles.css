@@ -509,11 +509,12 @@ body[data-page="list"] {
 }
 
 .funnel-row--0 { width: 100%; background: rgba(26, 26, 26, 0.03); }
-.funnel-row--1 { width: 85%;  background: rgba(26, 26, 26, 0.04); }
-.funnel-row--2 { width: 68%;  background: rgba(26, 26, 26, 0.05); }
-.funnel-row--3 { width: 52%;  background: rgba(26, 26, 26, 0.06); }
-.funnel-row--4 {
-  width: 36%;
+.funnel-row--1 { width: 88%;  background: rgba(26, 26, 26, 0.04); }
+.funnel-row--2 { width: 72%;  background: rgba(26, 26, 26, 0.05); }
+.funnel-row--3 { width: 58%;  background: rgba(26, 26, 26, 0.055); }
+.funnel-row--4 { width: 46%;  background: rgba(26, 26, 26, 0.06); }
+.funnel-row--5 {
+  width: 32%;
   background: rgba(26, 26, 26, 0.08);
   border: 1px solid var(--fg);
   border-radius: 2px;
@@ -646,6 +647,7 @@ body[data-page="list"] {
   .meth-intro { font-size: 0.7rem; }
   .regime-grid { grid-template-columns: 1fr; }
   .pipeline-node { max-width: 100%; }
+  .funnel-row--5 { width: 45%; }
   .funnel-row--4 { width: 55%; }
   .funnel-row--3 { width: 65%; }
   .funnel-row--2 { width: 78%; }

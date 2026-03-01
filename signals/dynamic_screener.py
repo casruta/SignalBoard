@@ -26,11 +26,12 @@ class DynamicScreener:
 
     # Default component weights (sum to 1.0) — fundamentals-first, numbers-driven
     DEFAULT_WEIGHTS = {
-        "piotroski": 0.18,
-        "cash_flow_quality": 0.18,    # critical for small caps
-        "roic_spread": 0.16,          # direct value creation measure
-        "balance_sheet": 0.14,
-        "dcf_upside": 0.14,           # valuation upside
+        "piotroski": 0.14,
+        "cash_flow_quality": 0.16,    # critical for small caps
+        "roic_spread": 0.14,          # direct value creation measure
+        "balance_sheet": 0.10,
+        "dcf_upside": 0.10,           # valuation upside
+        "income_health": 0.16,        # revenue trajectory, earnings persistence, peer-relative
         "growth_momentum": 0.10,      # revenue + earnings growth
         "margin_trajectory": 0.05,
         "blindspot": 0.05,            # minor — coverage gap is noise
@@ -41,6 +42,7 @@ class DynamicScreener:
         "risk_off": {
             "balance_sheet": 1.5,
             "cash_flow_quality": 1.3,
+            "income_health": 1.3,
             "dcf_upside": 0.7,
             "growth_momentum": 0.7,
             "margin_trajectory": 0.8,
@@ -48,6 +50,7 @@ class DynamicScreener:
         "risk_on": {
             "dcf_upside": 1.4,
             "growth_momentum": 1.5,
+            "income_health": 1.1,
             "margin_trajectory": 1.3,
             "balance_sheet": 0.8,
             "blindspot": 0.8,
@@ -123,6 +126,7 @@ class DynamicScreener:
         scored["cash_flow_score"] = self._score_component(raw["cash_flow_quality"])
         scored["balance_sheet_score"] = self._score_component(raw["balance_sheet"])
         scored["dcf_score"] = self._score_component(raw["dcf_upside"])
+        scored["income_health_score"] = self._score_component(raw["income_health"])
         scored["growth_score"] = self._score_component(raw["growth_momentum"])
         scored["blindspot_score"] = self._score_component(raw["blindspot"])
         scored["margin_score"] = self._score_component(raw["margin_trajectory"])
@@ -143,6 +147,7 @@ class DynamicScreener:
             "cash_flow_quality": "cash_flow_score",
             "balance_sheet": "balance_sheet_score",
             "dcf_upside": "dcf_score",
+            "income_health": "income_health_score",
             "growth_momentum": "growth_score",
             "blindspot": "blindspot_score",
             "margin_trajectory": "margin_score",
@@ -170,6 +175,7 @@ class DynamicScreener:
         - altman_z_score > 3.0  (safe zone only, excludes grey zone)
         - market_cap between min ($300M) and max ($20B) — configurable
         - At minimum 2 quarters of data available
+        - Revenue growth >= -10% (rejects severely contracting businesses)
 
         Returns True if stock passes all filters.
         """
@@ -191,6 +197,16 @@ class DynamicScreener:
 
         quarters = deep_fund.get("quarters_available", 0)
         if not isinstance(quarters, (int, float)) or quarters < 2:
+            return False
+
+        # Revenue decline hard floor — reject severely contracting businesses
+        min_rev_growth = -0.10
+        if config:
+            min_rev_growth = config.get("screening", {}).get(
+                "min_revenue_growth", min_rev_growth
+            )
+        rev_growth = _safe_float(info.get("revenueGrowth"))
+        if not np.isnan(rev_growth) and rev_growth < min_rev_growth:
             return False
 
         return True
@@ -257,6 +273,7 @@ class DynamicScreener:
         cash_flow_vals = []
         balance_sheet_vals = []
         dcf_upside_vals = []
+        income_health_vals = []
         growth_vals = []
         blindspot_vals = []
         margin_vals = []
@@ -286,8 +303,21 @@ class DynamicScreener:
             # DCF upside
             dcf_upside_vals.append(_safe_float(dcf.get("dcf_upside_pct")))
 
-            # Growth momentum: blend of revenue growth and earnings growth
+            # Income statement health: revenue growth, consistency,
+            # earnings persistence, operating trend, and peer-relative growth
             rev_growth = _safe_float(info.get("revenueGrowth"))
+            rev_consistency = _safe_float(df.get("revenue_growth_consistency"))
+            # Invert consistency (lower std = better) so higher is better
+            inv_consistency = -rev_consistency if not np.isnan(rev_consistency) else np.nan
+            earn_persist = _safe_float(df.get("earnings_persistence"))
+            om_trend = _safe_float(df.get("operating_margin_4q_trend"))
+            # Industry-relative revenue growth percentile (0-1, already oriented)
+            rev_industry_pctl = _safe_float(df.get("revenue_growth_industry_pctl"))
+            income_health_vals.append(
+                _nanmean([rev_growth, inv_consistency, earn_persist, om_trend, rev_industry_pctl])
+            )
+
+            # Growth momentum: blend of revenue growth and earnings growth
             earn_growth = _safe_float(info.get("earningsGrowth"))
             growth_vals.append(_nanmean([rev_growth, earn_growth]))
 
@@ -296,7 +326,6 @@ class DynamicScreener:
 
             # Margin trajectory: average of gross and operating margin trends
             gm_trend = _safe_float(df.get("gross_margin_4q_trend"))
-            om_trend = _safe_float(df.get("operating_margin_4q_trend"))
             margin_vals.append(_nanmean([gm_trend, om_trend]))
 
         return {
@@ -305,6 +334,7 @@ class DynamicScreener:
             "cash_flow_quality": pd.Series(cash_flow_vals),
             "balance_sheet": pd.Series(balance_sheet_vals),
             "dcf_upside": pd.Series(dcf_upside_vals),
+            "income_health": pd.Series(income_health_vals),
             "growth_momentum": pd.Series(growth_vals),
             "blindspot": pd.Series(blindspot_vals),
             "margin_trajectory": pd.Series(margin_vals),

@@ -305,7 +305,10 @@ def cmd_analyze(config: dict):
 def cmd_screen(config: dict):
     """Run dynamic screening to find top-quality under-the-radar stocks."""
     from data.data_manager import DataManager
-    from signals.fundamental_deep import compute_deep_fundamentals, compute_institutional_blindspot
+    from signals.fundamental_deep import (
+        compute_deep_fundamentals, compute_institutional_blindspot,
+        compute_industry_relative_metrics,
+    )
     from signals.dcf_valuation import compute_dcf_valuation
     from signals.dynamic_screener import DynamicScreener
 
@@ -360,6 +363,20 @@ def cmd_screen(config: dict):
                 adata.get("insider_df", pd.DataFrame()),
             )
             deep_fund_map[ticker].update(blindspot)
+        except Exception:
+            pass
+
+    # Compute industry-relative metrics for peer comparison
+    industry_map = {
+        t: info_map.get(t, {}).get("industry", "")
+        for t in deep_fund_map
+    }
+    for ticker in list(deep_fund_map):
+        try:
+            industry_rel = compute_industry_relative_metrics(
+                ticker, deep_fund_map[ticker], deep_fund_map, industry_map,
+            )
+            deep_fund_map[ticker].update(industry_rel)
         except Exception:
             pass
 

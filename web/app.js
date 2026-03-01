@@ -143,6 +143,7 @@
             html += miniBar("ROIC Spread", s.roic_spread_score);
             html += miniBar("Balance Sheet", s.balance_sheet_score);
             html += miniBar("DCF", s.dcf_score);
+            html += miniBar("Income Health", s.income_health_score);
             html += miniBar("Growth", s.growth_score);
             html += miniBar("Margins", s.margin_score);
             html += miniBar("Blindspot", s.blindspot_score);
@@ -1115,6 +1116,7 @@
             html += scoreCard("Cash Flow", s.cash_flow_score, fmtRatio(analysis.fcf_to_net_income, "x NI"));
             html += scoreCard("Balance Sheet", s.balance_sheet_score, fmtAltman(analysis.altman_z_score));
             html += scoreCard("DCF Valuation", s.dcf_score, fmtPct(analysis.dcf_upside_pct, true));
+            html += scoreCard("Income Health", s.income_health_score, fmtPct(analysis.roe, false));
             html += scoreCard("Under-Radar", s.blindspot_score, fmtAnalysts(analysis.analyst_count));
             html += scoreCard("Margin Trend", s.margin_score, null);
             html += '</div></div>';

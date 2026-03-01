@@ -156,6 +156,7 @@ def seed_live(db_path: str, config: dict) -> None:
     from signals.fundamental_deep import (
         compute_deep_fundamentals,
         compute_institutional_blindspot,
+        compute_industry_relative_metrics,
     )
     from signals.dcf_valuation import compute_dcf_valuation
     from signals.dynamic_screener import DynamicScreener
@@ -205,6 +206,20 @@ def seed_live(db_path: str, config: dict) -> None:
                 adata.get("insider_df", pd.DataFrame()),
             )
             deep_fund_map[ticker].update(blindspot)
+        except Exception:
+            pass
+
+    # Compute industry-relative metrics for peer comparison
+    industry_map = {
+        t: info_map.get(t, {}).get("industry", "")
+        for t in deep_fund_map
+    }
+    for ticker in list(deep_fund_map):
+        try:
+            industry_rel = compute_industry_relative_metrics(
+                ticker, deep_fund_map[ticker], deep_fund_map, industry_map,
+            )
+            deep_fund_map[ticker].update(industry_rel)
         except Exception:
             pass
 
@@ -304,6 +319,7 @@ def seed_live(db_path: str, config: dict) -> None:
             "roic_spread": ("ROIC vs WACC", "roic_spread_score"),
             "balance_sheet": ("Balance Sheet", "balance_sheet_score"),
             "dcf_upside": ("DCF Upside", "dcf_score"),
+            "income_health": ("Income Health", "income_health_score"),
             "growth_momentum": ("Growth Momentum", "growth_score"),
             "margin_trajectory": ("Margin Trajectory", "margin_score"),
             "blindspot": ("Blindspot", "blindspot_score"),
@@ -378,6 +394,7 @@ def seed_live(db_path: str, config: dict) -> None:
             "cash_flow_score": row.get("cash_flow_score"),
             "balance_sheet_score": row.get("balance_sheet_score"),
             "dcf_score": row.get("dcf_score"),
+            "income_health_score": row.get("income_health_score"),
             "growth_score": row.get("growth_score"),
             "blindspot_score": row.get("blindspot_score"),
             "margin_score": row.get("margin_score"),

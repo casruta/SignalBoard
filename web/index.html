@@ -55,17 +55,18 @@
       <button class="overlay-close">&times;</button>
       <h2 class="overlay-title">About This Model</h2>
       <p class="overlay-text">
-        SignalBoard scores every stock across seven quantitative dimensions,
+        SignalBoard scores every stock across eight quantitative dimensions,
         each normalized to 0&ndash;100:
       </p>
       <ul class="overlay-list">
-        <li>Piotroski F-Score &mdash; financial strength (profitability, leverage, efficiency)</li>
+        <li>Income Health &mdash; revenue trajectory, earnings persistence, and peer-relative growth</li>
         <li>Cash Flow &mdash; free cash flow yield and trend consistency</li>
+        <li>Piotroski F-Score &mdash; financial strength (profitability, leverage, efficiency)</li>
+        <li>ROIC Spread &mdash; return on invested capital minus weighted average cost of capital</li>
         <li>DCF Valuation &mdash; intrinsic value vs market price with margin of safety</li>
         <li>Balance Sheet &mdash; debt-to-equity, current ratio, net cash position</li>
-        <li>Blindspot &mdash; low analyst coverage signals institutional under-ownership</li>
         <li>Margins &mdash; gross and operating margin quality vs sector peers</li>
-        <li>ROIC Spread &mdash; return on invested capital minus weighted average cost of capital</li>
+        <li>Blindspot &mdash; low analyst coverage signals institutional under-ownership</li>
       </ul>
       <p class="overlay-text">
         A composite score weights these dimensions and ranks the universe daily.
@@ -155,42 +156,50 @@
         <div class="dim-list">
           <div class="dim-row">
             <div class="dim-header">
-              <span class="dim-name">Piotroski F-Score</span>
-              <span class="dim-weight">18%</span>
+              <span class="dim-name">Income Health</span>
+              <span class="dim-weight">16%</span>
             </div>
-            <div class="dim-track"><div class="dim-fill" data-width="90"></div></div>
-            <span class="dim-desc">Financial strength: profitability, leverage, operating efficiency (0&ndash;9 scale)</span>
+            <div class="dim-track"><div class="dim-fill" data-width="80"></div></div>
+            <span class="dim-desc">Revenue trajectory, earnings persistence, consistency, and peer-relative growth</span>
           </div>
           <div class="dim-row">
             <div class="dim-header">
               <span class="dim-name">Cash Flow Quality</span>
-              <span class="dim-weight">18%</span>
+              <span class="dim-weight">16%</span>
             </div>
-            <div class="dim-track"><div class="dim-fill" data-width="90"></div></div>
+            <div class="dim-track"><div class="dim-fill" data-width="80"></div></div>
             <span class="dim-desc">Operating cash flow trends, FCF-to-net-income ratio, inverted accruals</span>
           </div>
           <div class="dim-row">
             <div class="dim-header">
-              <span class="dim-name">ROIC Spread</span>
-              <span class="dim-weight">16%</span>
+              <span class="dim-name">Piotroski F-Score</span>
+              <span class="dim-weight">14%</span>
             </div>
-            <div class="dim-track"><div class="dim-fill" data-width="80"></div></div>
+            <div class="dim-track"><div class="dim-fill" data-width="70"></div></div>
+            <span class="dim-desc">Financial strength: profitability, leverage, operating efficiency (0&ndash;9 scale)</span>
+          </div>
+          <div class="dim-row">
+            <div class="dim-header">
+              <span class="dim-name">ROIC Spread</span>
+              <span class="dim-weight">14%</span>
+            </div>
+            <div class="dim-track"><div class="dim-fill" data-width="70"></div></div>
             <span class="dim-desc">Return on invested capital minus weighted average cost of capital</span>
           </div>
           <div class="dim-row">
             <div class="dim-header">
               <span class="dim-name">Balance Sheet</span>
-              <span class="dim-weight">14%</span>
+              <span class="dim-weight">10%</span>
             </div>
-            <div class="dim-track"><div class="dim-fill" data-width="70"></div></div>
+            <div class="dim-track"><div class="dim-fill" data-width="50"></div></div>
             <span class="dim-desc">Altman Z-score, interest coverage, debt-to-equity, current ratio</span>
           </div>
           <div class="dim-row">
             <div class="dim-header">
               <span class="dim-name">DCF Upside</span>
-              <span class="dim-weight">14%</span>
+              <span class="dim-weight">10%</span>
             </div>
-            <div class="dim-track"><div class="dim-fill" data-width="70"></div></div>
+            <div class="dim-track"><div class="dim-fill" data-width="50"></div></div>
             <span class="dim-desc">5-year discounted cash flow intrinsic value vs market price, margin of safety</span>
           </div>
           <div class="dim-row">
@@ -237,10 +246,14 @@
             <span class="funnel-label">Altman Z-Score &gt; 3.0</span>
           </div>
           <div class="funnel-row funnel-row--3">
+            <span class="funnel-count">~700</span>
+            <span class="funnel-label">Revenue growth &ge; &minus;10% YoY</span>
+          </div>
+          <div class="funnel-row funnel-row--4">
             <span class="funnel-count">~500</span>
             <span class="funnel-label">2+ quarters of financial data</span>
           </div>
-          <div class="funnel-row funnel-row--4">
+          <div class="funnel-row funnel-row--5">
             <span class="funnel-count">15</span>
             <span class="funnel-label">Top ranked by composite score</span>
           </div>
