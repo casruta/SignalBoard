@@ -92,14 +92,19 @@ def verify_dcf(dcf_result: dict, info: dict) -> VerificationResult:
         elif wacc > 0.20:
             result.warnings.append(f"WACC {wacc:.4f} is unusually high (> 20%)")
 
-    # 2. Intrinsic value vs market price
+    # 2. Intrinsic value vs market price (tightened from [0.1x, 10x])
     iv = dcf_result.get("intrinsic_value_per_share")
     if _is_valid(iv) and price is not None:
         result.metrics_checked += 1
-        if iv < 0.1 * price or iv > 10 * price:
+        if iv < 0.2 * price or iv > 5 * price:
             result.errors.append(
                 f"Intrinsic value ${iv:.2f} is outside "
-                f"[0.1x, 10x] of market price ${price:.2f}"
+                f"[0.2x, 5x] of market price ${price:.2f}"
+            )
+        elif iv < 0.3 * price or iv > 3 * price:
+            result.warnings.append(
+                f"Intrinsic value ${iv:.2f} is outside "
+                f"[0.3x, 3x] of market price ${price:.2f}"
             )
 
     # 3. DCF upside percentage
@@ -134,7 +139,13 @@ def verify_dcf(dcf_result: dict, info: dict) -> VerificationResult:
     implied_growth = dcf_result.get("implied_growth_rate")
     if _is_valid(implied_growth):
         result.metrics_checked += 1
-        if implied_growth < 0:
+        # Hard error: implied growth >= WACC means Gordon Growth diverges
+        if _is_valid(wacc) and implied_growth >= wacc:
+            result.errors.append(
+                f"Implied growth rate ({implied_growth:.2%}) >= WACC ({wacc:.2%}) "
+                f"— Gordon Growth Model cannot converge; valuation unreliable"
+            )
+        elif implied_growth < 0:
             result.warnings.append(
                 f"Implied growth rate is negative ({implied_growth:.2%})"
             )
@@ -161,6 +172,40 @@ def verify_dcf(dcf_result: dict, info: dict) -> VerificationResult:
             result.warnings.append(
                 f"Margin of safety {mos:.2%} outside expected range "
                 f"[-200%, 95%]"
+            )
+
+    # 8. Terminal value divergence (exit multiple cross-check)
+    tv_div = dcf_result.get("tv_divergence_pct")
+    if _is_valid(tv_div):
+        result.metrics_checked += 1
+        if tv_div > 1.0:
+            result.errors.append(
+                f"Terminal value divergence {tv_div:.0%} exceeds 100% "
+                f"— Gordon Growth and exit multiple drastically disagree"
+            )
+        elif tv_div > 0.5:
+            result.warnings.append(
+                f"Terminal value divergence {tv_div:.0%} exceeds 50%"
+            )
+
+    # 9. Implied reinvestment rate consistency
+    reinv = dcf_result.get("implied_reinvestment_rate")
+    if _is_valid(reinv):
+        result.metrics_checked += 1
+        if reinv > 1.5:
+            result.warnings.append(
+                f"Implied reinvestment rate {reinv:.1%} > 150% "
+                f"— projected growth may exceed what reinvestment supports"
+            )
+
+    # 10. Scenario range (model uncertainty)
+    scenario_range = dcf_result.get("scenario_range_pct")
+    if _is_valid(scenario_range):
+        result.metrics_checked += 1
+        if scenario_range > 1.0:
+            result.warnings.append(
+                f"Scenario range {scenario_range:.0%} > 100% "
+                f"— valuation highly sensitive to assumptions"
             )
 
     # Final pass/fail: errors mean failure; warnings are acceptable.

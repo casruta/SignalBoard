@@ -11,6 +11,8 @@ Key methodology choices following Aswath Damodaran's framework:
 - Size premium applied to cost of equity, not WACC
 """
 
+import math
+
 import numpy as np
 import pandas as pd
 import logging
@@ -62,6 +64,30 @@ COVERAGE_TO_SPREAD = [
 
 US_MARGINAL_TAX_RATE = 0.25  # 21% federal + ~4% blended state
 
+# ── Damodaran country risk premiums (Jan 2025) ──────────────────────
+# Source: Damodaran Online, country risk premium estimates
+COUNTRY_RISK_PREMIUM = {
+    "United States": 0.0, "Canada": 0.005, "United Kingdom": 0.005,
+    "Germany": 0.005, "France": 0.005, "Switzerland": 0.0,
+    "Japan": 0.008, "Australia": 0.005, "Ireland": 0.005,
+    "Netherlands": 0.005, "Sweden": 0.005, "Denmark": 0.005,
+    "South Korea": 0.008, "Taiwan": 0.008, "Israel": 0.008,
+    "Singapore": 0.005, "Hong Kong": 0.008,
+    "China": 0.015, "India": 0.020, "Brazil": 0.030,
+    "Mexico": 0.020, "South Africa": 0.025, "Russia": 0.040,
+    "Turkey": 0.030, "Indonesia": 0.020, "Thailand": 0.015,
+}
+
+# ── Sector median EV/EBITDA exit multiples (Damodaran, Jan 2025) ────
+SECTOR_EXIT_MULTIPLES = {
+    "Technology": 15.0, "Communication Services": 12.0,
+    "Healthcare": 13.0, "Consumer Discretionary": 12.0,
+    "Consumer Staples": 12.0, "Industrials": 11.0,
+    "Financial Services": 10.0, "Financials": 10.0,
+    "Energy": 8.0, "Materials": 9.0,
+    "Real Estate": 14.0, "Utilities": 10.0,
+}
+
 
 def get_terminal_growth(
     sector: str, default: float = 0.02, risk_free_rate: float | None = None,
@@ -81,6 +107,7 @@ def compute_dcf_valuation(
     terminal_growth: float | None = None,
     equity_risk_premium: float = 0.06,
     improving_fcf: bool = False,
+    altman_z: float | None = None,
 ) -> dict:
     """Compute DCF intrinsic value and related valuation metrics.
 
@@ -110,6 +137,17 @@ def compute_dcf_valuation(
         "implied_growth_rate": np.nan,
         "ev_to_fcf": np.nan,
         "ev_to_revenue": np.nan,
+        "delta_wc_estimated": False,
+        "implied_reinvestment_rate": np.nan,
+        "bear_iv": np.nan,
+        "base_iv": np.nan,
+        "bull_iv": np.nan,
+        "scenario_range_pct": np.nan,
+        "tv_gordon": np.nan,
+        "tv_exit_multiple": np.nan,
+        "tv_divergence_pct": np.nan,
+        "distress_probability": np.nan,
+        "distress_adjusted_iv": np.nan,
     }
 
     # Sector-dependent terminal growth — capped at risk-free rate (Damodaran)
@@ -142,9 +180,15 @@ def compute_dcf_valuation(
     # --- Base FCFF (Damodaran: EBIT(1-t) + D&A - CapEx - ΔWC) -------
     quarterly_cf = statements.get("quarterly_cashflow")
     quarterly_income = statements.get("quarterly_income")
-    base_fcf = _compute_fcff(statements)
+    base_fcf, delta_wc_estimated = _compute_fcff(statements)
+    result["delta_wc_estimated"] = delta_wc_estimated
 
-    # Fallback: adjust OCF by adding back after-tax interest (OCF→FCFF bridge)
+    # Fallback: OCF→FCFF bridge (Damodaran reconciliation).
+    # OCF already reflects NOPAT + D&A - ΔWC - after-tax interest (paid to
+    # debtholders). To recover FCFF we add CapEx (negative, so OCF+CapEx = FCFE)
+    # then add back after-tax interest to convert FCFE→FCFF.
+    # Sign conventions: CapEx is negative in yfinance; Interest Expense
+    # is typically positive (cash outflow reported as positive).
     if np.isnan(base_fcf) and quarterly_cf is not None and not quarterly_cf.empty:
         ocf = _trailing_4q_sum(quarterly_cf, "Operating Cash Flow")
         capex = _trailing_4q_sum(quarterly_cf, "Capital Expenditure")
@@ -190,6 +234,17 @@ def compute_dcf_valuation(
         logger.warning("Revenue growth unavailable; defaulting to terminal rate %.2f%%",
                         terminal_growth * 100)
 
+    # --- Reinvestment rate consistency check (Damodaran: g = reinvestment × ROIC)
+    if not np.isnan(roic) and roic > 0 and not np.isnan(revenue_growth):
+        implied_reinvestment = revenue_growth / roic
+        result["implied_reinvestment_rate"] = implied_reinvestment
+        if implied_reinvestment > 1.0:
+            logger.warning(
+                "Implied reinvestment rate %.1f%% > 100%% — growth %.1f%% "
+                "inconsistent with ROIC %.1f%%",
+                implied_reinvestment * 100, revenue_growth * 100, roic * 100,
+            )
+
     # --- Project FCF ---
     if np.isnan(wacc) or wacc <= terminal_growth:
         logger.warning("WACC (%.4f) <= terminal growth (%.4f); cannot compute DCF",
@@ -199,8 +254,23 @@ def compute_dcf_valuation(
     projected = project_fcf(base_fcf, revenue_growth, terminal_growth, projection_years,
                             improving_fcf=improving_fcf)
 
-    # --- Terminal value ---
+    # --- Terminal value (Gordon Growth + exit multiple cross-check) ---
     tv = compute_terminal_value(projected[-1], terminal_growth, wacc)
+    result["tv_gordon"] = tv
+
+    # Exit multiple cross-check using sector EV/EBITDA (Damodaran)
+    tv_exit = _compute_exit_multiple_tv(statements, sector, projected[-1], terminal_growth)
+    result["tv_exit_multiple"] = tv_exit
+    if tv > 0 and not np.isnan(tv_exit) and tv_exit > 0:
+        divergence = abs(tv - tv_exit) / min(tv, tv_exit)
+        result["tv_divergence_pct"] = divergence
+        if divergence > 0.50:
+            logger.warning(
+                "Terminal value divergence %.0f%%: Gordon=%.0fM vs Exit Multiple=%.0fM "
+                "— using blended average",
+                divergence * 100, tv / 1e6, tv_exit / 1e6,
+            )
+            tv = (tv + tv_exit) / 2.0
 
     # --- Discount projected FCFs and terminal value ---
     pv_fcfs = sum(fcf / (1 + wacc) ** yr for yr, fcf in enumerate(projected, start=1))
@@ -221,10 +291,32 @@ def compute_dcf_valuation(
     if not np.isnan(shares_outstanding) and shares_outstanding > 0:
         intrinsic = equity_value / shares_outstanding
         result["intrinsic_value_per_share"] = intrinsic
+        result["base_iv"] = intrinsic
 
         if not np.isnan(market_price) and market_price > 0:
             result["margin_of_safety"] = (intrinsic - market_price) / intrinsic
             result["dcf_upside_pct"] = intrinsic / market_price - 1
+
+        # --- Distress probability discount (Damodaran) ---
+        if altman_z is not None and not np.isnan(altman_z):
+            p_distress = _distress_probability(altman_z)
+            result["distress_probability"] = p_distress
+            if p_distress > 0:
+                total_assets = _get_balance_sheet_item(statements, "Total Assets")
+                liquidation_per_share = 0.0
+                if not np.isnan(total_assets) and total_assets > 0:
+                    liquidation_per_share = 0.3 * total_assets / shares_outstanding
+                adjusted = intrinsic * (1 - p_distress) + liquidation_per_share * p_distress
+                result["distress_adjusted_iv"] = adjusted
+            else:
+                result["distress_adjusted_iv"] = intrinsic
+
+        # --- Scenario analysis (bear / base / bull) ---
+        scenarios = _compute_scenarios(
+            base_fcf, wacc, revenue_growth, terminal_growth,
+            projection_years, net_debt, shares_outstanding, improving_fcf,
+        )
+        result.update(scenarios)
     else:
         logger.warning("Shares outstanding unavailable; cannot compute per-share intrinsic value")
 
@@ -274,7 +366,11 @@ def compute_wacc(
         elif market_cap < 10_000_000_000:
             size_premium = 0.005
 
-    cost_of_equity = risk_free_rate + beta * equity_risk_premium + size_premium
+    # Country risk premium (Damodaran: domicile-based equity risk adjustment)
+    country = info.get("country", "United States") if info else "United States"
+    crp = COUNTRY_RISK_PREMIUM.get(country, 0.01)  # 1% default for unknown
+
+    cost_of_equity = risk_free_rate + beta * equity_risk_premium + size_premium + crp
 
     # ── Synthetic cost of debt (Damodaran coverage → spread) ─────────
     annual_income = statements.get("annual_income")
@@ -301,8 +397,9 @@ def compute_wacc(
             + weight_debt * cost_of_debt * (1 - US_MARGINAL_TAX_RATE))
 
     # Clamp to sane range — log warning if inputs are suspect
-    if wacc < 0.04 or wacc > 0.25:
-        logger.warning("WACC %.4f outside normal range [4%%, 25%%] — check inputs "
+    # Warning range aligned with clamp range [4%, 30%] to avoid silent clamping
+    if wacc < 0.04 or wacc > 0.30:
+        logger.warning("WACC %.4f outside normal range [4%%, 30%%] — check inputs "
                        "(beta=%.2f, Kd=%.4f, D/E=%.2f)",
                        wacc, beta, cost_of_debt,
                        total_debt / equity_value if equity_value > 0 else float("inf"))
@@ -315,6 +412,12 @@ def compute_roic(statements: dict) -> float:
 
     NOPAT = Operating Income * (1 - tax_rate)
     Invested Capital = Total Equity + Total Debt - Cash
+
+    Tax rate note (Damodaran): Uses *effective* tax rate for NOPAT (reflects
+    actual taxes paid), while ``compute_wacc`` uses *marginal* tax rate (25%)
+    for the debt shield. This is correct — the debt tax shield is valued at the
+    marginal rate because each incremental dollar of interest saves taxes at
+    that rate, while NOPAT reflects actual cash flows after actual taxes paid.
     """
     annual_income = statements.get("annual_income")
     if annual_income is None or annual_income.empty:
@@ -383,9 +486,12 @@ def project_fcf(
         if years == 1:
             growth = terminal_growth
         else:
-            # Linear interpolation: yr=0 -> revenue_growth_rate, yr=years-1 -> terminal_growth
+            # Convex decay: faster fade early, flattens near terminal rate.
+            # Damodaran competitive fade — high growth attracts competition,
+            # eroding advantages non-linearly (base effect + competitive entry).
             fraction = yr / (years - 1)
-            growth = revenue_growth_rate + fraction * (terminal_growth - revenue_growth_rate)
+            convex_fraction = 1 - (1 - fraction) ** 2
+            growth = revenue_growth_rate + convex_fraction * (terminal_growth - revenue_growth_rate)
 
         current_fcf = current_fcf * (1 + growth)
         current_fcf = min(current_fcf, cap)
@@ -485,8 +591,7 @@ def _trailing_4q_sum(quarterly_df: pd.DataFrame, line_item: str) -> float:
 
     if len(values) < 4:
         logger.warning("Only %d quarters available for '%s'; need 4", len(values), line_item)
-        if len(values) == 0:
-            return np.nan
+        return np.nan
 
     return float(values.sum())
 
@@ -550,7 +655,13 @@ def _get_balance_sheet_item(statements: dict, line_item: str) -> float:
 
 
 def _get_total_debt(statements: dict) -> float:
-    """Total debt = Long-term + Short-term (Damodaran: all interest-bearing)."""
+    """Total debt = Long-term + Short-term (Damodaran: all interest-bearing).
+
+    Priority: prefer "Current Debt" when available (excludes lease obligations).
+    Falls back to "Current Debt And Capital Lease Obligation" only when
+    "Current Debt" is missing — avoids double-counting lease obligations
+    that yfinance sometimes bundles into the combined line item.
+    """
     ltd = _get_balance_sheet_item(statements, "Long Term Debt")
     std = _get_balance_sheet_item(statements, "Current Debt")
 
@@ -559,8 +670,8 @@ def _get_total_debt(statements: dict) -> float:
         total += ltd
     if not np.isnan(std):
         total += std
-    elif np.isnan(std):
-        # Try the combined line item that includes capital lease obligations
+    else:
+        # Fallback: combined line item (includes capital lease obligations)
         cp = _get_balance_sheet_item(statements, "Current Debt And Capital Lease Obligation")
         if not np.isnan(cp):
             total += cp
@@ -601,40 +712,45 @@ def _synthetic_cost_of_debt(
     return risk_free_rate + 0.12  # D-rated / distressed
 
 
-def _compute_fcff(statements: dict) -> float:
+def _compute_fcff(statements: dict) -> tuple[float, bool]:
     """Compute FCFF = EBIT(1-t) + D&A - CapEx - ΔWC (Damodaran).
 
-    Returns np.nan if insufficient data.
+    Returns (fcff, delta_wc_estimated) where delta_wc_estimated is True
+    when Change In Working Capital data is missing and defaults to 0.
+    For growth companies, missing ΔWC inflates FCFF because working capital
+    investment (inventory build, receivables growth) is ignored.
     """
     quarterly_income = statements.get("quarterly_income")
     quarterly_cf = statements.get("quarterly_cashflow")
 
     if quarterly_income is None or quarterly_income.empty:
-        return np.nan
+        return np.nan, False
     if quarterly_cf is None or quarterly_cf.empty:
-        return np.nan
+        return np.nan, False
 
     ebit = _trailing_4q_sum(quarterly_income, "Operating Income")
     if np.isnan(ebit):
-        return np.nan
+        return np.nan, False
 
     da = _trailing_4q_sum(quarterly_cf, "Depreciation And Amortization")
     capex = _trailing_4q_sum(quarterly_cf, "Capital Expenditure")
     delta_wc = _trailing_4q_sum(quarterly_cf, "Change In Working Capital")
 
+    delta_wc_estimated = False
     if np.isnan(da):
         da = 0.0
     if np.isnan(capex):
-        return np.nan  # can't compute without capex
+        return np.nan, False  # can't compute without capex
     if np.isnan(delta_wc):
         delta_wc = 0.0
+        delta_wc_estimated = True
 
     # FCFF = EBIT(1-t) + D&A + CapEx - ΔWC
     # Note: capex is typically negative in yfinance; delta_wc sign varies
     nopat = ebit * (1 - US_MARGINAL_TAX_RATE)
     fcff = nopat + da + capex - delta_wc
 
-    return fcff
+    return fcff, delta_wc_estimated
 
 
 def _populate_non_dcf_metrics(result: dict, base_fcf: float, market_cap: float,
@@ -645,3 +761,107 @@ def _populate_non_dcf_metrics(result: dict, base_fcf: float, market_cap: float,
             result["fcf_yield"] = base_fcf / market_cap
         if not np.isnan(enterprise_value) and enterprise_value > 0:
             result["ev_to_fcf"] = enterprise_value / base_fcf
+
+
+def _distress_probability(altman_z: float) -> float:
+    """Map Altman Z-Score to probability of distress (Damodaran).
+
+    Provides continuous discounting rather than binary gate. Companies
+    in the safe zone (Z > 3.0) get 0% distress, while grey zone firms
+    get a proportional haircut reflecting survival uncertainty.
+    """
+    if np.isnan(altman_z):
+        return 0.0
+    if altman_z > 3.0:
+        return 0.0
+    if altman_z > 2.7:
+        return 0.02
+    if altman_z > 1.8:
+        return 0.10
+    if altman_z > 1.0:
+        return 0.25
+    return 0.50
+
+
+def _compute_exit_multiple_tv(
+    statements: dict,
+    sector: str,
+    final_year_fcf: float,
+    terminal_growth: float,
+) -> float:
+    """Cross-check terminal value using sector EV/EBITDA exit multiple.
+
+    Gordon Growth terminal values are extremely sensitive to the WACC-g
+    spread. A sector-appropriate exit multiple provides a sanity bound.
+    Uses final-year EBITDA (estimated from TTM EBITDA grown at terminal rate
+    over the projection horizon) × sector median EV/EBITDA.
+    """
+    multiple = SECTOR_EXIT_MULTIPLES.get(sector)
+    if multiple is None:
+        return np.nan
+
+    # Use TTM EBITDA as base, grown at terminal rate to match projection endpoint
+    quarterly_income = statements.get("quarterly_income")
+    if quarterly_income is None or quarterly_income.empty:
+        return np.nan
+
+    if "EBITDA" not in quarterly_income.index:
+        return np.nan
+
+    ebitda_row = quarterly_income.loc["EBITDA"]
+    values = ebitda_row.iloc[:4].dropna()
+    if len(values) < 4:
+        return np.nan
+
+    ttm_ebitda = float(values.sum())
+    if ttm_ebitda <= 0:
+        return np.nan
+
+    return ttm_ebitda * multiple
+
+
+def _compute_scenarios(
+    base_fcf: float,
+    wacc: float,
+    revenue_growth: float,
+    terminal_growth: float,
+    projection_years: int,
+    net_debt: float,
+    shares_outstanding: float,
+    improving_fcf: bool,
+) -> dict:
+    """Compute bear/base/bull DCF scenarios (Damodaran: scenario analysis).
+
+    A single-point DCF creates false precision. Three scenarios reveal
+    the value range and which assumptions drive the valuation most.
+    """
+    result = {"bear_iv": np.nan, "bull_iv": np.nan, "scenario_range_pct": np.nan}
+
+    scenarios = {
+        "bear_iv": (max(0.0, revenue_growth * 0.5), wacc + 0.01, max(0.005, terminal_growth - 0.005)),
+        "bull_iv": (revenue_growth * 1.3, max(0.04, wacc - 0.005), terminal_growth),
+    }
+
+    for key, (g, w, tg) in scenarios.items():
+        if w <= tg:
+            continue
+        projected = project_fcf(base_fcf, g, tg, projection_years, improving_fcf=improving_fcf)
+        if not projected:
+            continue
+        tv = compute_terminal_value(projected[-1], tg, w)
+        pv_fcfs = sum(fcf / (1 + w) ** yr for yr, fcf in enumerate(projected, start=1))
+        pv_tv = tv / (1 + w) ** projection_years
+        ev = pv_fcfs + pv_tv
+        equity = ev - net_debt
+        if shares_outstanding > 0:
+            result[key] = equity / shares_outstanding
+
+    bear = result.get("bear_iv", np.nan)
+    bull = result.get("bull_iv", np.nan)
+    base = base_fcf  # use base_iv from caller
+    if not np.isnan(bear) and not np.isnan(bull) and not np.isnan(bear):
+        mid = (bear + bull) / 2.0
+        if mid > 0:
+            result["scenario_range_pct"] = (bull - bear) / mid
+
+    return result
