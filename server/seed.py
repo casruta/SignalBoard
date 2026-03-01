@@ -417,7 +417,7 @@ def seed_live(db_path: str, config: dict) -> None:
         analyst_n = deep.get("analyst_count")
         rev_growth = info.get("revenueGrowth")
         gross_m = info.get("grossMargins") or deep.get("gross_margin_4q_trend")
-        sbc_pct = deep.get("sbc_pct_of_revenue")
+        sbc_pct = deep.get("sbc_as_pct_revenue")
         net_debt = dcf.get("net_debt")
         alt_z = deep.get("altman_z_score")
         int_cov = deep.get("interest_coverage")
@@ -428,8 +428,8 @@ def seed_live(db_path: str, config: dict) -> None:
         roe = info.get("returnOnEquity")
         div_yield = info.get("dividendYield")
         payout = info.get("payoutRatio")
-        buyback_y = deep.get("buyback_yield")
-        fcf_conv = deep.get("fcf_conversion")
+        buyback_y = deep.get("total_shareholder_yield")
+        fcf_conv = deep.get("fcf_to_net_income")
         mkt_cap = info.get("marketCap", 0)
 
         # ── Fundamental points (rich, parseable by _parse_anchors) ──

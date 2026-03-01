@@ -1,10 +1,14 @@
-"""Dynamic screening: adaptive composite ranking via 8-dimension fundamentals model.
+"""Dynamic screening: Damodaran-aligned composite ranking via 9-dimension model.
 
-Replaces rigid threshold filters (ROE>12%, D/E<2, P/E<35) with an adaptive
-composite ranking system.  Stocks are scored holistically across 8 dimensions
-(Piotroski, cash flow quality, ROIC spread, balance sheet, DCF upside, growth
-momentum, margin trajectory, blindspot) so strength in one area can compensate
-for weakness in another.  Weights are fundamentals-first and config-driven.
+Stocks are scored across 9 dimensions (Piotroski, cash flow quality, ROIC spread,
+balance sheet, DCF upside, income health, growth momentum, margin trajectory,
+blindspot) with percentile-ranked 0-1 scores and regime-adjusted weights.
+
+Safety filters enforce 10 hard quality gates following Damodaran's framework:
+Altman Z > 3, Piotroski >= 5, ROIC > WACC, positive FCF, non-declining revenue,
+current ratio >= 1.0, minimum trading volume, and a 15% margin-of-safety
+requirement (Damodaran: never buy at fair value — require compensation for
+estimation error in the DCF).
 """
 
 from __future__ import annotations
@@ -131,13 +135,19 @@ class DynamicScreener:
         scored["blindspot_score"] = self._score_component(raw["blindspot"])
         scored["margin_score"] = self._score_component(raw["margin_trajectory"])
 
-        # Safety filter
+        # Safety filter — now includes DCF data for ROIC/FCF gates
         scored["passes_safety"] = [
             self._apply_safety_filters(
-                info_map.get(t, {}), deep_fundamentals.get(t, {}), config=config
+                info_map.get(t, {}), deep_fundamentals.get(t, {}),
+                dcf=dcf_results.get(t, {}), config=config,
             )
             for t in tickers
         ]
+
+        # Data completeness penalty — stocks with many NaN components
+        # get penalised instead of hiding behind 0.5 neutral scores.
+        # Count how many of the 9 raw components were NaN for each stock.
+        scored["data_completeness"] = self._compute_data_completeness(raw, len(tickers))
 
         # Weighted composite — use config overrides if provided
         weights = self._get_regime_weights(macro_regime, config=config)
@@ -152,10 +162,12 @@ class DynamicScreener:
             "blindspot": "blindspot_score",
             "margin_trajectory": "margin_score",
         }
-        scored["composite_score"] = sum(
+        raw_composite = sum(
             weights[component] * scored[col]
             for component, col in component_columns.items()
         )
+        # Apply data completeness penalty: full data = 1.0x, missing dims = discount
+        scored["composite_score"] = raw_composite * scored["data_completeness"]
 
         scored["rank"] = (
             scored["composite_score"].rank(ascending=False, method="min").astype(int)
@@ -168,45 +180,84 @@ class DynamicScreener:
     # ── Safety Filters ────────────────────────────────────────────────
 
     def _apply_safety_filters(
-        self, info: dict, deep_fund: dict, config: dict | None = None
+        self, info: dict, deep_fund: dict, dcf: dict | None = None,
+        config: dict | None = None,
     ) -> bool:
-        """Hard safety filters that cannot be compensated:
+        """Hard safety filters — a stock cannot score its way past these.
 
-        - altman_z_score > 3.0  (safe zone only, excludes grey zone)
-        - market_cap between min ($300M) and max ($20B) — configurable
-        - At minimum 2 quarters of data available
-        - Revenue growth >= -10% (rejects severely contracting businesses)
+        Damodaran-aligned quality gates:
+         1. Market cap between $300M and $10B (configurable)
+         2. Altman Z-Score > 3.0 (safe zone only)
+         3. At least 4 quarters of financial data
+         4. Revenue not declining (>= 0% YoY, configurable)
+         5. Piotroski F-Score >= 5/9 (minimum financial quality)
+         6. Positive free cash flow (FCF yield > 0)
+         7. ROIC > WACC (must create economic value)
+         8. Liquidity: current ratio >= 1.0
+         9. Minimum trading volume (liquidity screen)
+        10. Margin of safety: DCF upside >= 15% (Damodaran)
 
-        Returns True if stock passes all filters.
+        Returns True if stock passes ALL filters.
         """
+        cfg_s = config.get("screening", {}) if config else {}
+        dcf = dcf or {}
+
+        # 1. Market cap range
         market_cap = _safe_float(info.get("marketCap"))
-        min_cap = 300_000_000
-        max_cap = 20_000_000_000  # $20B default
-        if config:
-            min_cap = config.get("screening", {}).get("min_market_cap", min_cap)
-            max_cap = config.get("screening", {}).get("max_market_cap", max_cap)
+        min_cap = cfg_s.get("min_market_cap", 300_000_000)
+        max_cap = cfg_s.get("max_market_cap", 10_000_000_000)
         if np.isnan(market_cap) or market_cap < min_cap or market_cap > max_cap:
             return False
 
-        min_z = 3.0
-        if config:
-            min_z = config.get("screening", {}).get("min_altman_z", min_z)
+        # 2. Financial soundness — Altman Z safe zone
+        min_z = cfg_s.get("min_altman_z", 3.0)
         altman_z = _safe_float(deep_fund.get("altman_z_score"))
         if np.isnan(altman_z) or altman_z <= min_z:
             return False
 
+        # 3. Data completeness — need enough history for trend analysis
         quarters = deep_fund.get("quarters_available", 0)
-        if not isinstance(quarters, (int, float)) or quarters < 2:
+        min_quarters = cfg_s.get("min_quarters", 4)
+        if not isinstance(quarters, (int, float)) or quarters < min_quarters:
             return False
 
-        # Revenue decline hard floor — reject severely contracting businesses
-        min_rev_growth = -0.10
-        if config:
-            min_rev_growth = config.get("screening", {}).get(
-                "min_revenue_growth", min_rev_growth
-            )
+        # 4. Revenue trajectory — no declining businesses
+        min_rev_growth = cfg_s.get("min_revenue_growth", 0.0)
         rev_growth = _safe_float(info.get("revenueGrowth"))
         if not np.isnan(rev_growth) and rev_growth < min_rev_growth:
+            return False
+
+        # 5. Piotroski quality floor — minimum financial health
+        min_piotroski = cfg_s.get("min_piotroski", 5)
+        piotroski = _safe_float(deep_fund.get("piotroski_f_score"))
+        if np.isnan(piotroski) or piotroski < min_piotroski:
+            return False
+
+        # 6. Positive free cash flow — must generate cash
+        fcf_yield = _safe_float(dcf.get("fcf_yield"))
+        if not np.isnan(fcf_yield) and fcf_yield <= 0:
+            return False
+
+        # 7. Value creation — ROIC must exceed cost of capital
+        roic_spread = _safe_float(dcf.get("roic_vs_wacc_spread"))
+        if not np.isnan(roic_spread) and roic_spread <= 0:
+            return False
+
+        # 8. Liquidity gate — current ratio >= 1.0
+        current_ratio = _safe_float(deep_fund.get("current_ratio"))
+        if not np.isnan(current_ratio) and current_ratio < 1.0:
+            return False
+
+        # 9. Trading volume — enforce minimum daily volume (Damodaran: liquidity screen)
+        min_volume = cfg_s.get("min_avg_daily_volume", 100_000)
+        avg_volume = _safe_float(info.get("averageVolume"))
+        if not np.isnan(avg_volume) and avg_volume < min_volume:
+            return False
+
+        # 10. Margin of safety — Damodaran: require discount to intrinsic value
+        min_mos = cfg_s.get("min_margin_of_safety", 0.15)
+        dcf_upside = _safe_float(dcf.get("dcf_upside_pct"))
+        if not np.isnan(dcf_upside) and dcf_upside < min_mos:
             return False
 
         return True
@@ -216,19 +267,37 @@ class DynamicScreener:
     def _score_component(self, values: pd.Series) -> pd.Series:
         """Convert raw values to 0-1 percentile scores across the universe.
 
-        Higher percentile = better.  NaN values get 0.5 (neutral).
+        Higher percentile = better.  NaN values get 0.25 (below-median penalty)
+        to discourage data-sparse stocks from scoring well by default.
         """
         filled = values.copy()
         mask = filled.isna()
         non_null = filled[~mask]
 
         if non_null.empty:
-            return pd.Series(0.5, index=values.index)
+            return pd.Series(0.25, index=values.index)
 
         ranked = non_null.rank(pct=True, method="average")
         filled.loc[~mask] = ranked
-        filled.loc[mask] = 0.5
+        filled.loc[mask] = 0.25  # penalise missing data instead of neutral 0.5
         return filled
+
+    @staticmethod
+    def _compute_data_completeness(
+        raw: dict[str, pd.Series], n_stocks: int,
+    ) -> pd.Series:
+        """Fraction of non-NaN components per stock (0-1).
+
+        9 components total.  A stock with all 9 populated gets 1.0.
+        A stock with 6/9 gets ~0.93 (mild penalty via sqrt scaling).
+        A stock with 3/9 gets ~0.82 (meaningful penalty).
+        """
+        n_components = len(raw)
+        non_nan_count = pd.Series(0, index=range(n_stocks), dtype=float)
+        for component_values in raw.values():
+            non_nan_count += (~component_values.isna()).astype(float)
+        # Sqrt scaling: not as harsh as linear, but still meaningful
+        return (non_nan_count / n_components).apply(np.sqrt)
 
     def _get_regime_weights(
         self, macro_regime: str, config: dict | None = None

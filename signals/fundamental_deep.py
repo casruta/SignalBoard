@@ -257,10 +257,14 @@ def compute_balance_sheet_health(
     else:
         feats["altman_z_score"] = np.nan
 
-    # Interest coverage
+    # Interest coverage — debt-free companies with zero interest get a high
+    # coverage value (effectively infinite) rather than NaN
     if not np.isnan(interest) and interest < 0:
         interest = abs(interest)
-    feats["interest_coverage"] = _safe_divide(ebit_ttm, interest)
+    if not np.isnan(interest) and interest == 0.0 and not np.isnan(ebit_ttm):
+        feats["interest_coverage"] = 100.0 if ebit_ttm > 0 else 0.0
+    else:
+        feats["interest_coverage"] = _safe_divide(ebit_ttm, interest)
 
     # Current ratio
     feats["current_ratio"] = _safe_divide(ca, cl)
@@ -447,6 +451,7 @@ def compute_capital_allocation(
     info: dict,
     quarterly_cashflow: pd.DataFrame,
     quarterly_balance_sheet: pd.DataFrame,
+    quarterly_income: pd.DataFrame | None = None,
 ) -> dict:
     """5 features evaluating how management allocates capital."""
     feats: dict[str, float] = {}
@@ -493,10 +498,13 @@ def compute_capital_allocation(
     # Also try alternative label
     if np.isnan(div_paid_ttm):
         div_paid_ttm = _trailing_sum(cf, "Dividends Paid", 4)
-    ni_ttm = _trailing_sum(cf, "Net Income", 4)
+    # Net income from income statement (not cashflow — CF may not have it)
+    ni_ttm = np.nan
+    if quarterly_income is not None and not quarterly_income.empty:
+        ni_ttm = _trailing_sum(quarterly_income, "Net Income", 4)
     if np.isnan(ni_ttm):
-        # Net income might only be in income statement; approximate from CF
-        ni_ttm = _safe_line_item(cf, "Net Income From Continuing Operations", 0)
+        # Fallback to cashflow statement as last resort
+        ni_ttm = _trailing_sum(cf, "Net Income From Continuing Operations", 4)
     div_abs = abs(div_paid_ttm) if not np.isnan(div_paid_ttm) else np.nan
     feats["dividend_payout_ratio"] = _safe_divide(div_abs, ni_ttm)
 
@@ -907,7 +915,7 @@ def compute_deep_fundamentals(
 
     # Category 5: Capital Allocation (5 features)
     try:
-        features.update(compute_capital_allocation(info, qcf, qbs))
+        features.update(compute_capital_allocation(info, qcf, qbs, qi))
     except Exception:
         logger.warning("Capital allocation computation failed", exc_info=True)
 
@@ -1029,10 +1037,11 @@ def _compute_small_mid_cap_features(
     ar_prior = _safe_line_item(qbs, "Accounts Receivable", gap) if gap > 0 else np.nan
     rev_prior = _safe_line_item(qi, "Total Revenue", gap) if gap > 0 else np.nan
 
-    dso_curr = (ar_curr / rev_curr) * 365 if (
+    # Quarterly revenue → use 90 days, not 365 (single-quarter figure)
+    dso_curr = (ar_curr / rev_curr) * 90 if (
         not np.isnan(ar_curr) and not np.isnan(rev_curr) and rev_curr != 0
     ) else np.nan
-    dso_prior = (ar_prior / rev_prior) * 365 if (
+    dso_prior = (ar_prior / rev_prior) * 90 if (
         not np.isnan(ar_prior) and not np.isnan(rev_prior) and rev_prior != 0
     ) else np.nan
 

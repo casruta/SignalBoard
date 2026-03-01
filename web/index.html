@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SignalBoard</title>
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/styles.css?v=10">
+<link rel="stylesheet" href="/static/styles.css?v=11">
 </head>
 <body data-page="list">
 
@@ -116,7 +116,7 @@
           <div class="pipeline-node">
             <div class="pipeline-card">
               <span class="pipeline-label">Safety Filters</span>
-              <span class="pipeline-desc">Altman Z &gt; 3.0 &middot; Market cap $300M&ndash;$20B &middot; 2+ quarters of data</span>
+              <span class="pipeline-desc">Altman Z &gt; 3 &middot; Piotroski &ge; 5/9 &middot; ROIC &gt; WACC &middot; FCF &gt; 0 &middot; Revenue growing &middot; Current ratio &ge; 1.0</span>
             </div>
           </div>
           <div class="pipeline-connector"></div>
@@ -137,7 +137,7 @@
           <div class="pipeline-node">
             <div class="pipeline-card">
               <span class="pipeline-label">Composite Scoring</span>
-              <span class="pipeline-desc">7-dimension weighted score normalized 0&ndash;100, dynamically adjusted by macro regime (VIX-based risk-on / risk-off)</span>
+              <span class="pipeline-desc">9-dimension weighted score normalized 0&ndash;100, dynamically adjusted by macro regime (VIX-based risk-on / risk-off). Data completeness penalty applied.</span>
             </div>
           </div>
           <div class="pipeline-connector"></div>
@@ -239,22 +239,30 @@
           </div>
           <div class="funnel-row funnel-row--1">
             <span class="funnel-count">~1,800</span>
-            <span class="funnel-label">Market cap $300M &ndash; $20B</span>
+            <span class="funnel-label">Market cap $300M &ndash; $10B</span>
           </div>
           <div class="funnel-row funnel-row--2">
             <span class="funnel-count">~900</span>
-            <span class="funnel-label">Altman Z-Score &gt; 3.0</span>
+            <span class="funnel-label">Altman Z-Score &gt; 3.0 (safe zone)</span>
           </div>
           <div class="funnel-row funnel-row--3">
-            <span class="funnel-count">~700</span>
-            <span class="funnel-label">Revenue growth &ge; &minus;10% YoY</span>
+            <span class="funnel-count">~600</span>
+            <span class="funnel-label">4+ quarters of financial data</span>
           </div>
           <div class="funnel-row funnel-row--4">
-            <span class="funnel-count">~500</span>
-            <span class="funnel-label">2+ quarters of financial data</span>
+            <span class="funnel-count">~400</span>
+            <span class="funnel-label">Revenue growing (YoY &ge; 0%)</span>
           </div>
           <div class="funnel-row funnel-row--5">
-            <span class="funnel-count">15</span>
+            <span class="funnel-count">~250</span>
+            <span class="funnel-label">Piotroski F-Score &ge; 5/9</span>
+          </div>
+          <div class="funnel-row funnel-row--6">
+            <span class="funnel-count">~150</span>
+            <span class="funnel-label">Positive FCF &middot; ROIC &gt; WACC &middot; Current ratio &ge; 1.0</span>
+          </div>
+          <div class="funnel-row funnel-row--7">
+            <span class="funnel-count">3</span>
             <span class="funnel-label">Top ranked by composite score</span>
           </div>
         </div>
@@ -292,6 +300,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=10"></script>
+  <script src="/static/app.js?v=11"></script>
 </body>
 </html>

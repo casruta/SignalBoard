@@ -1,4 +1,15 @@
-"""DCF (Discounted Cash Flow) intrinsic value computation and valuation features."""
+"""DCF (Discounted Cash Flow) intrinsic value computation — Damodaran-aligned.
+
+Key methodology choices following Aswath Damodaran's framework:
+- FCFF (Free Cash Flow to Firm) = EBIT(1-t) + D&A - CapEx - ΔWC
+- Discount at WACC (not cost of equity)
+- Bottom-up beta: sector unlevered beta relevered for company D/E
+- Synthetic cost of debt: interest-coverage → default spread + Rf
+- Marginal tax rate (21%) for WACC shield; effective for NOPAT
+- Terminal growth capped at risk-free rate
+- SBC subtracted from cash flows (real dilution)
+- Size premium applied to cost of equity, not WACC
+"""
 
 import numpy as np
 import pandas as pd
@@ -6,6 +17,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# ── Sector terminal growth — capped at Rf dynamically ────────────────
 SECTOR_TERMINAL_GROWTH = {
     "Technology": 0.035, "Communication Services": 0.030,
     "Healthcare": 0.030, "Consumer Discretionary": 0.025,
@@ -14,10 +26,51 @@ SECTOR_TERMINAL_GROWTH = {
     "Energy": 0.015, "Materials": 0.020, "Utilities": 0.015,
 }
 
+# ── Damodaran bottom-up unlevered betas by sector ────────────────────
+# Source: Damodaran Online, US sector averages (Jan 2025)
+SECTOR_UNLEVERED_BETA = {
+    "Technology": 1.10,
+    "Communication Services": 0.90,
+    "Healthcare": 0.95,
+    "Consumer Discretionary": 0.95,
+    "Consumer Staples": 0.55,
+    "Industrials": 0.80,
+    "Financial Services": 0.55,
+    "Financials": 0.55,
+    "Energy": 0.90,
+    "Materials": 0.80,
+    "Real Estate": 0.55,
+    "Utilities": 0.35,
+}
 
-def get_terminal_growth(sector: str, default: float = 0.02) -> float:
-    """Return sector-appropriate terminal growth rate."""
-    return SECTOR_TERMINAL_GROWTH.get(sector, default)
+# ── Damodaran synthetic rating: interest coverage → default spread ───
+# Source: Damodaran Online, ratings/default spreads (2024-2025)
+COVERAGE_TO_SPREAD = [
+    (12.50, 0.0063),   # AAA
+    (8.50,  0.0078),   # AA
+    (6.50,  0.0098),   # A+
+    (5.50,  0.0108),   # A
+    (4.25,  0.0122),   # A-
+    (3.00,  0.0156),   # BBB
+    (2.50,  0.0200),   # BB+
+    (2.00,  0.0250),   # BB
+    (1.50,  0.0325),   # B+
+    (1.25,  0.0400),   # B
+    (0.80,  0.0500),   # B-
+    (0.50,  0.0800),   # CCC
+]
+
+US_MARGINAL_TAX_RATE = 0.25  # 21% federal + ~4% blended state
+
+
+def get_terminal_growth(
+    sector: str, default: float = 0.02, risk_free_rate: float | None = None,
+) -> float:
+    """Return sector-appropriate terminal growth rate, capped at Rf."""
+    raw = SECTOR_TERMINAL_GROWTH.get(sector, default)
+    if risk_free_rate is not None:
+        return min(raw, risk_free_rate)
+    return raw
 
 
 def compute_dcf_valuation(
@@ -59,15 +112,21 @@ def compute_dcf_valuation(
         "ev_to_revenue": np.nan,
     }
 
-    # Sector-dependent terminal growth if not explicitly provided
+    # Sector-dependent terminal growth — capped at risk-free rate (Damodaran)
+    sector = info.get("sector", "") if info else ""
     if terminal_growth is None:
-        sector = info.get("sector", "") if info else ""
-        terminal_growth = get_terminal_growth(sector)
+        terminal_growth = get_terminal_growth(sector, risk_free_rate=risk_free_rate)
+    else:
+        terminal_growth = min(terminal_growth, risk_free_rate)
 
     market_price = _safe_get(info, "currentPrice")
-    shares_outstanding = _safe_get(info, "sharesOutstanding")
     market_cap = _safe_get(info, "marketCap")
     enterprise_value = _safe_get(info, "enterpriseValue")
+
+    # Prefer diluted share count (Damodaran: accounts for SBC dilution)
+    shares_outstanding = _safe_get(info, "impliedSharesOutstanding")
+    if np.isnan(shares_outstanding):
+        shares_outstanding = _safe_get(info, "sharesOutstanding")
 
     # --- WACC ---
     wacc = compute_wacc(info, statements, risk_free_rate, equity_risk_premium)
@@ -80,26 +139,36 @@ def compute_dcf_valuation(
     if not np.isnan(wacc) and not np.isnan(roic):
         result["roic_vs_wacc_spread"] = roic - wacc
 
-    # --- Base FCF (trailing 4 quarters) ---
+    # --- Base FCFF (Damodaran: EBIT(1-t) + D&A - CapEx - ΔWC) -------
     quarterly_cf = statements.get("quarterly_cashflow")
-    base_fcf = np.nan
-    if quarterly_cf is not None and not quarterly_cf.empty:
-        base_fcf = _trailing_4q_sum(quarterly_cf, "Free Cash Flow")
-        if np.isnan(base_fcf):
-            # Fall back to Operating Cash Flow - CapEx
-            ocf = _trailing_4q_sum(quarterly_cf, "Operating Cash Flow")
-            capex = _trailing_4q_sum(quarterly_cf, "Capital Expenditure")
-            if not np.isnan(ocf) and not np.isnan(capex):
-                base_fcf = ocf + capex  # capex is typically negative
+    quarterly_income = statements.get("quarterly_income")
+    base_fcf = _compute_fcff(statements)
+
+    # Fallback: adjust OCF by adding back after-tax interest (OCF→FCFF bridge)
+    if np.isnan(base_fcf) and quarterly_cf is not None and not quarterly_cf.empty:
+        ocf = _trailing_4q_sum(quarterly_cf, "Operating Cash Flow")
+        capex = _trailing_4q_sum(quarterly_cf, "Capital Expenditure")
+        if not np.isnan(ocf) and not np.isnan(capex):
+            base_fcf = ocf + capex  # capex negative
+            # Add back after-tax interest to convert FCFE→FCFF
+            annual_income = statements.get("annual_income")
+            if annual_income is not None and not annual_income.empty:
+                interest = _get_latest_line_item(annual_income, "Interest Expense")
+                if not np.isnan(interest) and abs(interest) > 0:
+                    base_fcf += abs(interest) * (1 - US_MARGINAL_TAX_RATE)
+
+    # Subtract SBC from FCF (Damodaran: SBC is real dilution expense)
+    if not np.isnan(base_fcf) and quarterly_cf is not None and not quarterly_cf.empty:
+        sbc = _trailing_4q_sum(quarterly_cf, "Stock Based Compensation")
+        if not np.isnan(sbc):
+            base_fcf -= abs(sbc)
 
     if np.isnan(base_fcf) or base_fcf <= 0:
-        logger.warning("Cannot compute DCF: base FCF is missing or non-positive (%.2f)",
+        logger.warning("Cannot compute DCF: base FCFF is missing or non-positive (%.2f)",
                         base_fcf if not np.isnan(base_fcf) else 0.0)
-        # Still populate what we can
         _populate_non_dcf_metrics(result, base_fcf, market_cap, enterprise_value)
 
         # EV/Revenue for pre-profit companies
-        quarterly_income = statements.get("quarterly_income")
         if quarterly_income is not None and not quarterly_income.empty:
             rev_ttm = _trailing_4q_sum(quarterly_income, "Total Revenue")
             if not np.isnan(rev_ttm) and rev_ttm > 0 and not np.isnan(enterprise_value):
@@ -110,9 +179,12 @@ def compute_dcf_valuation(
     # --- FCF yield and EV/FCF ---
     _populate_non_dcf_metrics(result, base_fcf, market_cap, enterprise_value)
 
-    # --- Revenue growth for projections ---
+    # --- Revenue growth for projections (multi-horizon median) -------
     annual_income = statements.get("annual_income")
-    revenue_growth = _revenue_growth_cagr(annual_income, years=3)
+    g1 = _revenue_growth_cagr(annual_income, years=1)
+    g3 = _revenue_growth_cagr(annual_income, years=3)
+    g5 = _revenue_growth_cagr(annual_income, years=5)
+    revenue_growth = float(np.nanmedian([g1, g3, g5]))
     if np.isnan(revenue_growth):
         revenue_growth = terminal_growth
         logger.warning("Revenue growth unavailable; defaulting to terminal rate %.2f%%",
@@ -120,7 +192,8 @@ def compute_dcf_valuation(
 
     # --- Project FCF ---
     if np.isnan(wacc) or wacc <= terminal_growth:
-        logger.warning("WACC (%.4f) <= terminal growth (%.4f); cannot compute DCF", wacc, terminal_growth)
+        logger.warning("WACC (%.4f) <= terminal growth (%.4f); cannot compute DCF",
+                        wacc, terminal_growth)
         return result
 
     projected = project_fcf(base_fcf, revenue_growth, terminal_growth, projection_years,
@@ -135,14 +208,11 @@ def compute_dcf_valuation(
 
     enterprise_dcf = pv_fcfs + pv_tv
 
-    # --- Equity value ---
-    # Subtract net debt: total_debt - cash
-    total_debt = _get_balance_sheet_item(statements, "Long Term Debt")
+    # --- Equity value (total debt incl. short-term) ---
+    total_debt = _get_total_debt(statements)
     cash = _get_balance_sheet_item(statements, "Cash And Cash Equivalents")
 
-    net_debt = 0.0
-    if not np.isnan(total_debt):
-        net_debt += total_debt
+    net_debt = total_debt
     if not np.isnan(cash):
         net_debt -= cash
 
@@ -173,78 +243,70 @@ def compute_wacc(
     risk_free_rate: float,
     equity_risk_premium: float = 0.06,
 ) -> float:
-    """Compute WACC = E/(E+D) * Ke + D/(E+D) * Kd * (1-tax).
+    """Compute WACC following Damodaran methodology.
 
-    Cost of equity via CAPM: risk_free + beta * equity_risk_premium.
-    Cost of debt: interest_expense / total_debt.
-    Adds tiered illiquidity premiums by market cap (2.5% micro, 2% small,
-    1% lower-mid, 0.5% mid-cap).
-    Clamps result to [0.05, 0.30].
+    Improvements over naive WACC:
+    - Bottom-up beta (sector unlevered, relevered for company D/E)
+    - Synthetic cost of debt (interest coverage → default spread + Rf)
+    - Marginal tax rate (25% = 21% fed + 4% state) for debt shield
+    - Total debt includes short-term + long-term
+    - Size premium added to cost of equity (not WACC)
     """
     market_cap = _safe_get(info, "marketCap")
-    beta = _safe_get(info, "beta", default=1.0)
+    sector = info.get("sector", "") if info else ""
 
-    # Cost of equity via CAPM
-    cost_of_equity = risk_free_rate + beta * equity_risk_premium
+    # ── Total debt: long-term + short-term ───────────────────────────
+    total_debt = _get_total_debt(statements)
 
-    # Debt figures from balance sheet
-    total_debt = _get_balance_sheet_item(statements, "Long Term Debt")
-    if np.isnan(total_debt):
-        total_debt = 0.0
+    # ── Bottom-up beta: sector unlevered → relever for company D/E ──
+    equity_value = market_cap if not np.isnan(market_cap) and market_cap > 0 else 0.0
+    beta = _compute_bottom_up_beta(sector, total_debt, equity_value)
 
-    # Interest expense and tax rate from income statement
+    # ── Size premium on cost of equity ───────────────────────────────
+    size_premium = 0.0
+    if not np.isnan(market_cap):
+        if market_cap < 500_000_000:
+            size_premium = 0.025
+        elif market_cap < 1_000_000_000:
+            size_premium = 0.020
+        elif market_cap < 3_000_000_000:
+            size_premium = 0.010
+        elif market_cap < 10_000_000_000:
+            size_premium = 0.005
+
+    cost_of_equity = risk_free_rate + beta * equity_risk_premium + size_premium
+
+    # ── Synthetic cost of debt (Damodaran coverage → spread) ─────────
     annual_income = statements.get("annual_income")
     interest_expense = np.nan
-    tax_rate = np.nan
+    ebit = np.nan
 
     if annual_income is not None and not annual_income.empty:
         interest_expense = _get_latest_line_item(annual_income, "Interest Expense")
-        tax_provision = _get_latest_line_item(annual_income, "Tax Provision")
-        pretax_income = _get_latest_line_item(annual_income, "Net Income")
+        ebit = _get_latest_line_item(annual_income, "Operating Income")
 
-        # Try to compute effective tax rate
-        if not np.isnan(tax_provision) and not np.isnan(pretax_income):
-            # Pretax = net_income + tax_provision (approximate)
-            pretax = pretax_income + tax_provision
-            if pretax > 0:
-                tax_rate = tax_provision / pretax
+    cost_of_debt = _synthetic_cost_of_debt(ebit, interest_expense, risk_free_rate)
 
-    if np.isnan(tax_rate) or tax_rate < 0 or tax_rate > 0.5:
-        tax_rate = 0.21  # Default US corporate rate
-
-    # Cost of debt
-    cost_of_debt = 0.05  # Default
-    if not np.isnan(interest_expense) and total_debt > 0:
-        raw_cost = abs(interest_expense) / total_debt
-        if 0.0 < raw_cost < 0.30:
-            cost_of_debt = raw_cost
-
-    # Capital structure weights
-    equity = market_cap if not np.isnan(market_cap) and market_cap > 0 else 0.0
-    total_capital = equity + total_debt
-
+    # ── Capital structure weights ────────────────────────────────────
+    total_capital = equity_value + total_debt
     if total_capital <= 0:
         logger.warning("Total capital is zero; cannot compute WACC")
         return np.nan
 
-    weight_equity = equity / total_capital
+    weight_equity = equity_value / total_capital
     weight_debt = total_debt / total_capital
 
-    wacc = weight_equity * cost_of_equity + weight_debt * cost_of_debt * (1 - tax_rate)
+    # Marginal tax rate for WACC debt shield (Damodaran: always marginal)
+    wacc = (weight_equity * cost_of_equity
+            + weight_debt * cost_of_debt * (1 - US_MARGINAL_TAX_RATE))
 
-    # Tiered illiquidity premiums by market cap
-    if not np.isnan(market_cap):
-        if market_cap < 500_000_000:
-            wacc += 0.025  # micro-cap
-        elif market_cap < 1_000_000_000:
-            wacc += 0.020  # small-cap
-        elif market_cap < 3_000_000_000:
-            wacc += 0.010  # lower mid-cap
-        elif market_cap < 10_000_000_000:
-            wacc += 0.005  # mid-cap
-
-    # Clamp to sane range
-    wacc = float(np.clip(wacc, 0.05, 0.30))
+    # Clamp to sane range — log warning if inputs are suspect
+    if wacc < 0.04 or wacc > 0.25:
+        logger.warning("WACC %.4f outside normal range [4%%, 25%%] — check inputs "
+                       "(beta=%.2f, Kd=%.4f, D/E=%.2f)",
+                       wacc, beta, cost_of_debt,
+                       total_debt / equity_value if equity_value > 0 else float("inf"))
+    wacc = float(np.clip(wacc, 0.04, 0.30))
     return wacc
 
 
@@ -275,18 +337,16 @@ def compute_roic(statements: dict) -> float:
 
     nopat = operating_income * (1 - tax_rate)
 
-    # Invested capital from balance sheet
+    # Invested capital: Equity + Total Debt (LT + ST) - Cash  (Damodaran)
     total_equity = _get_balance_sheet_item(statements, "Stockholders Equity")
-    total_debt = _get_balance_sheet_item(statements, "Long Term Debt")
+    total_debt = _get_total_debt(statements)
     cash = _get_balance_sheet_item(statements, "Cash And Cash Equivalents")
 
     if np.isnan(total_equity):
         logger.warning("Stockholders equity unavailable for ROIC")
         return np.nan
 
-    invested_capital = total_equity
-    if not np.isnan(total_debt):
-        invested_capital += total_debt
+    invested_capital = total_equity + total_debt
     if not np.isnan(cash):
         invested_capital -= cash
 
@@ -395,11 +455,14 @@ def compute_implied_growth_rate(
 
 
 def _safe_get(d: dict, key: str, default=np.nan):
-    """Safely get a value from dict, returning default if missing/None/0."""
+    """Safely get a value from dict, returning default if missing or None.
+
+    Zero is a valid value (e.g. beta=0) and is NOT replaced by default.
+    """
     if d is None:
         return default
     val = d.get(key)
-    if val is None or val == 0:
+    if val is None:
         return default
     return val
 
@@ -484,6 +547,94 @@ def _get_balance_sheet_item(statements: dict, line_item: str) -> float:
 
     logger.warning("Balance sheet item '%s' not found", line_item)
     return np.nan
+
+
+def _get_total_debt(statements: dict) -> float:
+    """Total debt = Long-term + Short-term (Damodaran: all interest-bearing)."""
+    ltd = _get_balance_sheet_item(statements, "Long Term Debt")
+    std = _get_balance_sheet_item(statements, "Current Debt")
+
+    total = 0.0
+    if not np.isnan(ltd):
+        total += ltd
+    if not np.isnan(std):
+        total += std
+    elif np.isnan(std):
+        # Try the combined line item that includes capital lease obligations
+        cp = _get_balance_sheet_item(statements, "Current Debt And Capital Lease Obligation")
+        if not np.isnan(cp):
+            total += cp
+
+    return total
+
+
+def _compute_bottom_up_beta(
+    sector: str, total_debt: float, market_cap_equity: float,
+    marginal_tax: float = US_MARGINAL_TAX_RATE,
+) -> float:
+    """Damodaran bottom-up beta: unlevered sector beta relevered for D/E.
+
+    beta_levered = beta_unlevered × (1 + (1-t) × D/E)
+    """
+    unlevered = SECTOR_UNLEVERED_BETA.get(sector, 0.85)
+    if market_cap_equity <= 0:
+        return unlevered  # no leverage info → return unlevered
+    de_ratio = total_debt / market_cap_equity
+    return unlevered * (1 + (1 - marginal_tax) * de_ratio)
+
+
+def _synthetic_cost_of_debt(
+    ebit: float, interest_expense: float, risk_free_rate: float,
+) -> float:
+    """Damodaran synthetic rating: interest coverage → default spread + Rf."""
+    # Debt-free companies: near risk-free cost of debt
+    if np.isnan(interest_expense) or abs(interest_expense) < 1:
+        return risk_free_rate + 0.0063  # AAA-equivalent spread
+
+    if np.isnan(ebit):
+        return risk_free_rate + 0.0250  # BB-equivalent when EBIT unknown
+
+    coverage = ebit / abs(interest_expense)
+    for threshold, spread in COVERAGE_TO_SPREAD:
+        if coverage >= threshold:
+            return risk_free_rate + spread
+    return risk_free_rate + 0.12  # D-rated / distressed
+
+
+def _compute_fcff(statements: dict) -> float:
+    """Compute FCFF = EBIT(1-t) + D&A - CapEx - ΔWC (Damodaran).
+
+    Returns np.nan if insufficient data.
+    """
+    quarterly_income = statements.get("quarterly_income")
+    quarterly_cf = statements.get("quarterly_cashflow")
+
+    if quarterly_income is None or quarterly_income.empty:
+        return np.nan
+    if quarterly_cf is None or quarterly_cf.empty:
+        return np.nan
+
+    ebit = _trailing_4q_sum(quarterly_income, "Operating Income")
+    if np.isnan(ebit):
+        return np.nan
+
+    da = _trailing_4q_sum(quarterly_cf, "Depreciation And Amortization")
+    capex = _trailing_4q_sum(quarterly_cf, "Capital Expenditure")
+    delta_wc = _trailing_4q_sum(quarterly_cf, "Change In Working Capital")
+
+    if np.isnan(da):
+        da = 0.0
+    if np.isnan(capex):
+        return np.nan  # can't compute without capex
+    if np.isnan(delta_wc):
+        delta_wc = 0.0
+
+    # FCFF = EBIT(1-t) + D&A + CapEx - ΔWC
+    # Note: capex is typically negative in yfinance; delta_wc sign varies
+    nopat = ebit * (1 - US_MARGINAL_TAX_RATE)
+    fcff = nopat + da + capex - delta_wc
+
+    return fcff
 
 
 def _populate_non_dcf_metrics(result: dict, base_fcf: float, market_cap: float,

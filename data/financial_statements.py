@@ -239,6 +239,11 @@ class FinancialStatementLoader:
         rename = {k: v for k, v in col_map.items() if k in df.columns}
         df = df.rename(columns=rename)
 
+        # Transpose to match yfinance layout: line items as rows,
+        # dates as columns (most recent first).
+        df = df.T
+        df = df[df.columns[::-1]]  # most recent first
+
         return df
 
     # ------------------------------------------------------------------

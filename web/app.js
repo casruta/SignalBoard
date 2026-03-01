@@ -797,6 +797,10 @@
                 }
                 html += '</tr></thead><tbody>';
 
+                // Subject company first — the stock we are analysing
+                if (comps.subject) {
+                    html += compRow(comps.subject, "subject-row");
+                }
                 // Peer rows
                 for (var p = 0; p < comps.peers.length; p++) {
                     html += compRow(comps.peers[p], "");
@@ -804,10 +808,6 @@
                 // Peer median
                 if (comps.peer_median) {
                     html += compRow(comps.peer_median, "peer-median-row");
-                }
-                // Subject
-                if (comps.subject) {
-                    html += compRow(comps.subject, "subject-row");
                 }
                 // Premium/discount
                 if (comps.premium_discount) {
