@@ -33,6 +33,8 @@ def fetch_prices(
 
     if not force_refresh and cache.exists():
         cached = pd.read_parquet(cache)
+        if cached.index.tz is not None:
+            cached.index = cached.index.tz_localize(None)
         last_date = cached.index.max()
         today = pd.Timestamp.now().normalize()
         # If cache is fresh (updated today or market hasn't closed yet), return it
@@ -95,6 +97,9 @@ def _download(ticker: str, start: str | None, end: str | None) -> pd.DataFrame:
     # Keep only OHLCV columns
     cols = [c for c in ["Open", "High", "Low", "Close", "Volume"] if c in df.columns]
     df = df[cols]
+    # Normalize to tz-naive so cached parquet and Timestamp.now() comparisons work
+    if df.index.tz is not None:
+        df.index = df.index.tz_localize(None)
     df.index.name = "Date"
     return df
 

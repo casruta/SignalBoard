@@ -19,6 +19,34 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+# SEC 10-Q filing deadline: 40 days (accelerated filer) to 45 days
+# (large accelerated filer) after quarter-end.  In backtests, all
+# fundamental data must be lagged by at least this many days to
+# prevent look-ahead bias.
+DEFAULT_FILING_LAG_DAYS = 45
+
+
+def filter_by_filing_lag(
+    df: pd.DataFrame,
+    as_of_date: pd.Timestamp | datetime,
+    filing_lag_days: int = DEFAULT_FILING_LAG_DAYS,
+) -> pd.DataFrame:
+    """Drop columns (quarters) whose data wouldn't be public by *as_of_date*.
+
+    Financial statement DataFrames have date columns sorted descending.
+    A quarter ending June 30 isn't available until ~August 14 (45 days).
+    In backtest mode, pass the rebalance date as *as_of_date* and this
+    function removes any columns that would not yet be filed.
+    """
+    if df is None or df.empty:
+        return df
+    cutoff = pd.Timestamp(as_of_date) - pd.Timedelta(days=filing_lag_days)
+    valid_cols = [c for c in df.columns if pd.Timestamp(c) <= cutoff]
+    if not valid_cols:
+        return df.iloc[:, :0]  # empty but preserves index
+    return df[valid_cols]
+
+
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
@@ -176,22 +204,26 @@ def compute_profitability_trajectory(
     feats["roic_latest"] = roic_vals[0] if roic_vals else np.nan
     feats["roic_4q_trend"] = _compute_trend(roic_vals)
 
-    # --- Margin trends ---
+    # --- Margin trends (8Q lookback for stability; 4 data points gave
+    # huge coefficient standard errors — 8Q provides ~2 years of data) ---
     gm_vals = _ratio_series(
         quarterly_income, "Gross Profit",
         quarterly_income, "Total Revenue",
+        n=8,
     )
     feats["gross_margin_4q_trend"] = _compute_trend(gm_vals)
 
     om_vals = _ratio_series(
         quarterly_income, "Operating Income",
         quarterly_income, "Total Revenue",
+        n=8,
     )
     feats["operating_margin_4q_trend"] = _compute_trend(om_vals)
 
     nm_vals = _ratio_series(
         quarterly_income, "Net Income",
         quarterly_income, "Total Revenue",
+        n=8,
     )
     feats["net_margin_4q_trend"] = _compute_trend(nm_vals)
 

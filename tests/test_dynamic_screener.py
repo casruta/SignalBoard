@@ -17,6 +17,7 @@ def _make_healthy_deep_fund() -> dict:
         "altman_z_score": 5.0,
         "interest_coverage": 12.0,
         "current_ratio": 2.0,
+        "quick_ratio": 1.8,
         "accruals_ratio": -0.03,
         "fcf_to_net_income": 1.1,
         "gross_margin_4q_trend": 0.02,
@@ -43,6 +44,7 @@ def _make_healthy_info(market_cap: float = 5e9) -> dict:
         "marketCap": market_cap,
         "revenueGrowth": 0.08,
         "averageVolume": 500_000,   # passes 100k volume filter
+        "sector": "Technology",
     }
 
 
@@ -57,6 +59,7 @@ def _make_deep_fundamentals(n_stocks: int = 10) -> dict[str, dict]:
             "altman_z_score": rng.uniform(3.5, 6.0),
             "interest_coverage": rng.uniform(5, 20),
             "current_ratio": rng.uniform(1.2, 3.0),
+            "quick_ratio": rng.uniform(1.0, 2.5),
             "accruals_ratio": rng.uniform(-0.10, 0.05),
             "fcf_to_net_income": rng.uniform(0.8, 1.5),
             "gross_margin_4q_trend": rng.uniform(-0.05, 0.05),
@@ -83,7 +86,12 @@ def _make_dcf_results(tickers: list[str]) -> dict[str, dict]:
 
 def _make_info_map(tickers: list[str], market_cap: float = 5e9) -> dict[str, dict]:
     return {
-        t: {"marketCap": market_cap, "revenueGrowth": 0.08, "averageVolume": 500_000}
+        t: {
+            "marketCap": market_cap,
+            "revenueGrowth": 0.08,
+            "averageVolume": 500_000,
+            "sector": "Technology",
+        }
         for t in tickers
     }
 
@@ -153,6 +161,8 @@ class TestComputeCompositeScores:
             "growth_score",
             "blindspot_score",
             "margin_score",
+            "momentum_score",
+            "low_vol_score",
             "passes_safety",
             "data_completeness",
         ]
@@ -167,32 +177,65 @@ class TestComputeCompositeScores:
         score_cols = [
             "piotroski_score", "roic_spread_score", "cash_flow_score",
             "balance_sheet_score", "dcf_score", "blindspot_score", "margin_score",
-            "income_health_score", "growth_score",
+            "income_health_score", "growth_score", "momentum_score", "low_vol_score",
         ]
         for col in score_cols:
             assert (df[col] >= 0).all() and (df[col] <= 1).all(), f"{col} out of [0,1]"
 
-    def test_data_completeness_penalises_sparse_data(self):
+    def test_data_completeness_excludes_sparse_data(self):
         deep, dcf, info, tickers = _build_test_data()
         screener = DynamicScreener()
 
-        # Make one stock have very sparse data
+        # Make one stock have very sparse data (only 3 dims populated)
         sparse_t = tickers[0]
         deep[sparse_t] = {"quarters_available": 8, "altman_z_score": 5.0,
-                          "piotroski_f_score": 7, "current_ratio": 2.0}
+                          "piotroski_f_score": 7}
         dcf[sparse_t] = {}
-        info[sparse_t] = {"marketCap": 5e9, "revenueGrowth": 0.08, "averageVolume": 500_000}
+        info[sparse_t] = {"marketCap": 5e9, "revenueGrowth": 0.08,
+                          "averageVolume": 500_000, "sector": "Technology"}
 
         df = screener.compute_composite_scores(deep, dcf, info)
         sparse_row = df[df["ticker"] == sparse_t].iloc[0]
-        full_rows = df[df["ticker"] != sparse_t]
-        # Sparse stock should have lower data_completeness
-        assert sparse_row["data_completeness"] < full_rows["data_completeness"].mean()
+        # Sparse stock should be hard-excluded (completeness = 0.0)
+        assert sparse_row["data_completeness"] == 0.0
+        assert sparse_row["composite_score"] == 0.0
 
     def test_empty_input(self):
         screener = DynamicScreener()
         df = screener.compute_composite_scores({}, {}, {})
         assert df.empty
+
+    def test_dcf_upside_capped(self):
+        """DCF upside values should be capped at [-50%, +200%]."""
+        deep, dcf, info, tickers = _build_test_data(n_stocks=3)
+        screener = DynamicScreener()
+        # Set extreme DCF upside
+        dcf[tickers[0]]["dcf_upside_pct"] = 5.0  # 500% — should be capped at 200%
+        dcf[tickers[1]]["dcf_upside_pct"] = -0.9  # -90% — should be floored at -50%
+        df = screener.compute_composite_scores(deep, dcf, info)
+        # Both extreme stocks should still have valid scores (capped, not NaN)
+        assert df["dcf_score"].notna().all()
+
+
+# ── Tests: Winsorization ─────────────────────────────────────────────
+
+
+class TestWinsorization:
+    def test_winsorize_clips_outliers(self):
+        values = pd.Series([1, 2, 3, 4, 5, 6, 7, 8, 9, 100])
+        result = DynamicScreener._winsorize(values, lower=0.1, upper=0.9)
+        assert result.max() <= 100  # with 10 values, 90th pctile < 100
+        assert result.min() >= 1
+
+    def test_winsorize_preserves_nan(self):
+        values = pd.Series([1, 2, np.nan, 4, 5, 6, 7, 8, 9, 10])
+        result = DynamicScreener._winsorize(values)
+        assert result.isna().sum() == 1
+
+    def test_winsorize_small_series_unchanged(self):
+        values = pd.Series([1.0, 2.0, 3.0])
+        result = DynamicScreener._winsorize(values)
+        pd.testing.assert_series_equal(result, values)
 
 
 # ── Tests: Regime weight adjustment ──────────────────────────────────
@@ -217,6 +260,14 @@ class TestRegimeAdjustment:
             weights = screener._get_regime_weights(regime)
             assert abs(sum(weights.values()) - 1.0) < 1e-9
 
+    def test_new_dimensions_have_weights(self):
+        screener = DynamicScreener()
+        weights = screener._get_regime_weights("neutral")
+        assert "price_momentum" in weights
+        assert "low_volatility" in weights
+        assert weights["price_momentum"] > 0
+        assert weights["low_volatility"] > 0
+
 
 # ── Tests: Safety filter ─────────────────────────────────────────────
 
@@ -224,7 +275,7 @@ class TestRegimeAdjustment:
 class TestSafetyFilter:
     """Damodaran-aligned safety filters: market cap, Altman Z > 3, 4+ quarters,
     non-declining revenue, Piotroski >= 5, positive FCF, ROIC > WACC,
-    current ratio >= 1.0, volume >= 100k, margin of safety >= 15%."""
+    liquidity ratio, volume >= 100k, margin of safety >= 15%."""
 
     def _healthy(self):
         """Return (info, deep_fund, dcf) that passes all safety filters."""
@@ -303,10 +354,29 @@ class TestSafetyFilter:
         dcf["roic_vs_wacc_spread"] = -0.02  # ROIC < WACC
         assert screener._apply_safety_filters(info, deep, dcf=dcf) is False
 
-    def test_blocks_weak_current_ratio(self):
+    def test_blocks_weak_quick_ratio_for_tech(self):
+        """Tech sector uses quick ratio (not current ratio) for liquidity gate."""
         screener = DynamicScreener()
         info, deep, dcf = self._healthy()
-        deep["current_ratio"] = 0.7  # need >= 1.0
+        info["sector"] = "Technology"
+        deep["quick_ratio"] = 0.5  # below 0.8 threshold
+        assert screener._apply_safety_filters(info, deep, dcf=dcf) is False
+
+    def test_uses_current_ratio_for_industrials(self):
+        """Industrials (inventory-heavy) still use current ratio >= 1.0."""
+        screener = DynamicScreener()
+        info, deep, dcf = self._healthy()
+        info["sector"] = "Industrials"
+        deep["current_ratio"] = 0.7
+        assert screener._apply_safety_filters(info, deep, dcf=dcf) is False
+
+    def test_quick_ratio_fallback_to_current_ratio(self):
+        """When quick ratio is missing for non-manufacturing, falls back to current ratio."""
+        screener = DynamicScreener()
+        info, deep, dcf = self._healthy()
+        info["sector"] = "Technology"
+        deep.pop("quick_ratio", None)
+        deep["current_ratio"] = 0.7
         assert screener._apply_safety_filters(info, deep, dcf=dcf) is False
 
     # ── New Damodaran gates ──────────────────────────────────────────
@@ -353,6 +423,95 @@ class TestSafetyFilter:
         dcf["dcf_upside_pct"] = 0.08  # 8% — would fail default 15%
         config = {"screening": {"min_margin_of_safety": 0.05}}
         assert screener._apply_safety_filters(info, deep, dcf=dcf, config=config) is True
+
+
+# ── Tests: Price momentum & volatility ───────────────────────────────
+
+
+class TestPriceMomentumAndVol:
+    def test_momentum_from_price_data(self):
+        from signals.dynamic_screener import _compute_price_momentum
+        dates = pd.bdate_range(end="2025-12-31", periods=300)
+        prices = pd.Series(np.linspace(50, 100, 300), index=dates, name="Close")
+        df = pd.DataFrame({"Close": prices})
+        mom = _compute_price_momentum(df)
+        assert not np.isnan(mom)
+        assert mom > 0  # price went up
+
+    def test_momentum_returns_nan_for_short_history(self):
+        from signals.dynamic_screener import _compute_price_momentum
+        dates = pd.bdate_range(end="2025-12-31", periods=100)
+        prices = pd.Series(np.linspace(50, 60, 100), index=dates, name="Close")
+        df = pd.DataFrame({"Close": prices})
+        assert np.isnan(_compute_price_momentum(df))
+
+    def test_realized_vol_positive(self):
+        from signals.dynamic_screener import _compute_realized_vol
+        dates = pd.bdate_range(end="2025-12-31", periods=100)
+        rng = np.random.default_rng(42)
+        prices = pd.Series(100 * np.exp(np.cumsum(rng.normal(0, 0.01, 100))),
+                           index=dates, name="Close")
+        df = pd.DataFrame({"Close": prices})
+        vol = _compute_realized_vol(df)
+        assert not np.isnan(vol)
+        assert vol > 0
+
+    def test_realized_vol_nan_for_short_data(self):
+        from signals.dynamic_screener import _compute_realized_vol
+        dates = pd.bdate_range(end="2025-12-31", periods=30)
+        prices = pd.Series(np.linspace(50, 60, 30), index=dates, name="Close")
+        df = pd.DataFrame({"Close": prices})
+        assert np.isnan(_compute_realized_vol(df))
+
+
+# ── Tests: IC-weighted allocation ────────────────────────────────────
+
+
+class TestICWeights:
+    def test_ic_weights_sum_to_one(self):
+        rng = np.random.default_rng(42)
+        n = 100
+        factor_scores = pd.DataFrame({
+            "a": rng.normal(size=n),
+            "b": rng.normal(size=n),
+        })
+        forward_returns = pd.Series(rng.normal(size=n))
+        base = {"a": 0.5, "b": 0.5}
+        weights = DynamicScreener.compute_ic_weights(
+            factor_scores, forward_returns, base, shrinkage=0.5,
+        )
+        assert abs(sum(weights.values()) - 1.0) < 1e-9
+
+    def test_ic_weights_fall_back_to_base_when_no_signal(self):
+        n = 100
+        factor_scores = pd.DataFrame({
+            "a": [np.nan] * n,
+            "b": [np.nan] * n,
+        })
+        forward_returns = pd.Series([0.0] * n)
+        base = {"a": 0.6, "b": 0.4}
+        weights = DynamicScreener.compute_ic_weights(
+            factor_scores, forward_returns, base, shrinkage=0.5,
+        )
+        assert abs(weights["a"] - 0.6) < 0.01
+        assert abs(weights["b"] - 0.4) < 0.01
+
+
+# ── Tests: Filing lag utility ────────────────────────────────────────
+
+
+class TestFilingLag:
+    def test_filter_by_filing_lag(self):
+        from signals.fundamental_deep import filter_by_filing_lag
+        dates = pd.to_datetime(["2025-06-30", "2025-03-31", "2024-12-31"])
+        df = pd.DataFrame(
+            {"2025-06-30": [100], "2025-03-31": [90], "2024-12-31": [80]},
+            index=["Total Revenue"],
+        )
+        df.columns = dates
+        # As of Aug 1, only Q ending March 31 and Dec 31 should be available
+        result = filter_by_filing_lag(df, pd.Timestamp("2025-08-01"), filing_lag_days=45)
+        assert len(result.columns) == 2  # Jun 30 excluded (not yet filed)
 
 
 # ── Tests: Damodaran DCF helpers ─────────────────────────────────────

@@ -320,6 +320,7 @@ def cmd_screen(config: dict):
     statements = dm.get_all_statements()
     alt_data = dm.get_all_alternative_data()
     macro = dm.get_macro()
+    prices = dm.get_all_prices()
 
     # Get risk-free rate
     risk_free_rate = 0.04
@@ -396,15 +397,16 @@ def cmd_screen(config: dict):
     # Run screener
     screener = DynamicScreener(top_n=config.get("screening", {}).get("top_n", 50))
     scores_df = screener.compute_composite_scores(
-        deep_fund_map, dcf_map, info_map, macro_regime, config=config
+        deep_fund_map, dcf_map, info_map, macro_regime, config=config,
+        price_data=prices,
     )
 
     logger.info("\n=== Top Stocks by Composite Quality Score ===")
-    logger.info("%-6s  %-8s  %-6s  %-6s  %-6s  %-6s  %-6s  %-6s  %-6s  %s",
-                "Rank", "Ticker", "Score", "Piotr", "ROIC", "CFlow", "BSheet", "DCF", "Blind", "Safe")
+    logger.info("%-6s  %-8s  %-6s  %-6s  %-6s  %-6s  %-6s  %-6s  %-6s  %-6s  %-6s  %s",
+                "Rank", "Ticker", "Score", "Piotr", "ROIC", "CFlow", "BSheet", "DCF", "Blind", "Mom", "LVol", "Safe")
     for _, row in scores_df.head(30).iterrows():
         logger.info(
-            "%-6d  %-8s  %.3f   %.3f   %.3f   %.3f   %.3f   %.3f   %.3f   %s",
+            "%-6d  %-8s  %.3f   %.3f   %.3f   %.3f   %.3f   %.3f   %.3f   %.3f   %.3f   %s",
             int(row.get("rank", 0)),
             row.get("ticker", ""),
             row.get("composite_score", 0),
@@ -414,6 +416,8 @@ def cmd_screen(config: dict):
             row.get("balance_sheet_score", 0),
             row.get("dcf_score", 0),
             row.get("blindspot_score", 0),
+            row.get("momentum_score", 0),
+            row.get("low_vol_score", 0),
             "YES" if row.get("passes_safety", False) else "NO",
         )
 

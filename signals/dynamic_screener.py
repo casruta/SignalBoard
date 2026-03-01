@@ -29,16 +29,21 @@ class DynamicScreener:
     """
 
     # Default component weights (sum to 1.0) — fundamentals-first, numbers-driven
+    # Revised: added price_momentum (most robust cross-sectional predictor,
+    # Jegadeesh-Titman 1993); reduced income_health and growth_momentum to
+    # compensate and reduce multicollinearity from shared revenue/growth inputs.
     DEFAULT_WEIGHTS = {
         "piotroski": 0.14,
         "cash_flow_quality": 0.16,    # critical for small caps
-        "roic_spread": 0.14,          # direct value creation measure
+        "roic_spread": 0.12,          # direct value creation measure
         "balance_sheet": 0.10,
-        "dcf_upside": 0.10,           # valuation upside
-        "income_health": 0.16,        # revenue trajectory, earnings persistence, peer-relative
-        "growth_momentum": 0.10,      # revenue + earnings growth
+        "dcf_upside": 0.07,           # valuation upside (reduced — also a gate)
+        "income_health": 0.11,        # earnings persistence, consistency, peer-relative
+        "growth_momentum": 0.05,      # revenue + earnings growth
         "margin_trajectory": 0.05,
-        "blindspot": 0.05,            # minor — coverage gap is noise
+        "blindspot": 0.05,            # coverage gap / neglect premium
+        "price_momentum": 0.10,       # 12-1 month price momentum
+        "low_volatility": 0.05,       # 60-day realized vol (inverted)
     }
 
     # Regime adjustments: multiply default weights by these factors
@@ -47,17 +52,21 @@ class DynamicScreener:
             "balance_sheet": 1.5,
             "cash_flow_quality": 1.3,
             "income_health": 1.3,
+            "low_volatility": 1.4,
             "dcf_upside": 0.7,
             "growth_momentum": 0.7,
             "margin_trajectory": 0.8,
+            "price_momentum": 0.6,      # momentum crashes in risk-off
         },
         "risk_on": {
             "dcf_upside": 1.4,
             "growth_momentum": 1.5,
             "income_health": 1.1,
             "margin_trajectory": 1.3,
+            "price_momentum": 1.3,
             "balance_sheet": 0.8,
             "blindspot": 0.8,
+            "low_volatility": 0.7,
         },
     }
 
@@ -74,17 +83,19 @@ class DynamicScreener:
         macro_regime: str = "neutral",
         vix_level: float | None = None,
         config: dict | None = None,
+        price_data: dict[str, pd.DataFrame] | None = None,
     ) -> list[str]:
         """Screen and rank stocks, return top N tickers.
 
         Steps:
         1. Apply hard safety filters (can't score your way past these)
-        2. Compute 8 component scores per stock (0-1 range, percentile-ranked)
+        2. Compute component scores per stock (0-1 range, percentile-ranked)
         3. Apply regime-adjusted weights
         4. Sort by composite score, return top N
         """
         df = self.compute_composite_scores(
-            deep_fundamentals, dcf_results, info_map, macro_regime, config=config
+            deep_fundamentals, dcf_results, info_map, macro_regime,
+            config=config, price_data=price_data,
         )
         if df.empty:
             logger.warning("No stocks survived screening.")
@@ -98,6 +109,9 @@ class DynamicScreener:
         safe = safe.sort_values("composite_score", ascending=False).head(self.top_n)
         return safe["ticker"].tolist()
 
+    # Minimum populated dimensions to be scored (hard exclusion below this)
+    MIN_POPULATED_DIMS = 6
+
     def compute_composite_scores(
         self,
         deep_fundamentals: dict[str, dict],
@@ -105,14 +119,22 @@ class DynamicScreener:
         info_map: dict[str, dict],
         macro_regime: str = "neutral",
         config: dict | None = None,
+        price_data: dict[str, pd.DataFrame] | None = None,
     ) -> pd.DataFrame:
         """Compute composite quality scores for all stocks.
 
         Returns DataFrame with columns:
         - ticker, composite_score, rank
         - piotroski_score, roic_spread_score, cash_flow_score,
-          balance_sheet_score, dcf_score, growth_score, blindspot_score, margin_score
+          balance_sheet_score, dcf_score, growth_score, blindspot_score,
+          margin_score, momentum_score, low_vol_score
         - passes_safety (bool)
+
+        Parameters
+        ----------
+        price_data : optional dict mapping ticker -> DataFrame with 'Close'
+            column and DatetimeIndex.  Used for price momentum and
+            realized volatility dimensions.
         """
         tickers = sorted(
             set(deep_fundamentals) | set(dcf_results) | set(info_map)
@@ -121,7 +143,15 @@ class DynamicScreener:
             return pd.DataFrame()
 
         # Extract raw values for each component
-        raw = self._extract_raw_values(tickers, deep_fundamentals, dcf_results, info_map)
+        raw = self._extract_raw_values(
+            tickers, deep_fundamentals, dcf_results, info_map,
+            price_data=price_data,
+        )
+
+        # Winsorize raw inputs at 1st/99th percentile before ranking
+        # to stabilise rankings and reduce turnover from outlier-driven swaps
+        for key in raw:
+            raw[key] = self._winsorize(raw[key])
 
         # Percentile-rank each component across the universe
         scored = pd.DataFrame({"ticker": tickers})
@@ -134,6 +164,8 @@ class DynamicScreener:
         scored["growth_score"] = self._score_component(raw["growth_momentum"])
         scored["blindspot_score"] = self._score_component(raw["blindspot"])
         scored["margin_score"] = self._score_component(raw["margin_trajectory"])
+        scored["momentum_score"] = self._score_component(raw["price_momentum"])
+        scored["low_vol_score"] = self._score_component(raw["low_volatility"])
 
         # Safety filter — now includes DCF data for ROIC/FCF gates
         scored["passes_safety"] = [
@@ -144,9 +176,9 @@ class DynamicScreener:
             for t in tickers
         ]
 
-        # Data completeness penalty — stocks with many NaN components
-        # get penalised instead of hiding behind 0.5 neutral scores.
-        # Count how many of the 9 raw components were NaN for each stock.
+        # Data completeness: hard-exclude stocks with fewer than MIN_POPULATED_DIMS.
+        # Stocks with sufficient data get no penalty (the old sqrt approach was
+        # ad-hoc and biased toward large-cap well-covered stocks).
         scored["data_completeness"] = self._compute_data_completeness(raw, len(tickers))
 
         # Weighted composite — use config overrides if provided
@@ -161,12 +193,14 @@ class DynamicScreener:
             "growth_momentum": "growth_score",
             "blindspot": "blindspot_score",
             "margin_trajectory": "margin_score",
+            "price_momentum": "momentum_score",
+            "low_volatility": "low_vol_score",
         }
         raw_composite = sum(
-            weights[component] * scored[col]
+            weights.get(component, 0.0) * scored[col]
             for component, col in component_columns.items()
         )
-        # Apply data completeness penalty: full data = 1.0x, missing dims = discount
+        # Apply data completeness: stocks below threshold get score zeroed out
         scored["composite_score"] = raw_composite * scored["data_completeness"]
 
         scored["rank"] = (
@@ -243,10 +277,23 @@ class DynamicScreener:
         if not np.isnan(roic_spread) and roic_spread <= 0:
             return False
 
-        # 8. Liquidity gate — current ratio >= 1.0
-        current_ratio = _safe_float(deep_fund.get("current_ratio"))
-        if not np.isnan(current_ratio) and current_ratio < 1.0:
-            return False
+        # 8. Liquidity gate — use quick ratio for non-manufacturing sectors
+        # (current ratio includes inventory, which is irrelevant for SaaS/services)
+        _INVENTORY_SECTORS = {"Industrials", "Materials", "Consumer Staples", "Energy"}
+        sector = info.get("sector", "")
+        if sector in _INVENTORY_SECTORS:
+            current_ratio = _safe_float(deep_fund.get("current_ratio"))
+            if not np.isnan(current_ratio) and current_ratio < 1.0:
+                return False
+        else:
+            quick_ratio = _safe_float(deep_fund.get("quick_ratio"))
+            if not np.isnan(quick_ratio) and quick_ratio < 0.8:
+                return False
+            elif np.isnan(quick_ratio):
+                # Fallback to current ratio when quick ratio unavailable
+                current_ratio = _safe_float(deep_fund.get("current_ratio"))
+                if not np.isnan(current_ratio) and current_ratio < 1.0:
+                    return False
 
         # 9. Trading volume — enforce minimum daily volume (Damodaran: liquidity screen)
         min_volume = cfg_s.get("min_avg_daily_volume", 100_000)
@@ -264,40 +311,52 @@ class DynamicScreener:
 
     # ── Component Score Helpers ───────────────────────────────────────
 
+    @staticmethod
+    def _winsorize(values: pd.Series, lower: float = 0.01, upper: float = 0.99) -> pd.Series:
+        """Winsorize at *lower*/*upper* percentiles to reduce outlier impact."""
+        non_null = values.dropna()
+        if len(non_null) < 5:
+            return values
+        lo = non_null.quantile(lower)
+        hi = non_null.quantile(upper)
+        return values.clip(lower=lo, upper=hi)
+
     def _score_component(self, values: pd.Series) -> pd.Series:
         """Convert raw values to 0-1 percentile scores across the universe.
 
-        Higher percentile = better.  NaN values get 0.25 (below-median penalty)
-        to discourage data-sparse stocks from scoring well by default.
+        Higher percentile = better.  NaN values get 0.5 (neutral) rather
+        than a penalty — data-sparse stocks are handled by the hard
+        completeness exclusion at MIN_POPULATED_DIMS instead.
         """
         filled = values.copy()
         mask = filled.isna()
         non_null = filled[~mask]
 
         if non_null.empty:
-            return pd.Series(0.25, index=values.index)
+            return pd.Series(0.5, index=values.index)
 
         ranked = non_null.rank(pct=True, method="average")
         filled.loc[~mask] = ranked
-        filled.loc[mask] = 0.25  # penalise missing data instead of neutral 0.5
+        filled.loc[mask] = 0.5  # neutral for missing — hard exclusion handles sparse data
         return filled
 
-    @staticmethod
     def _compute_data_completeness(
-        raw: dict[str, pd.Series], n_stocks: int,
+        self, raw: dict[str, pd.Series], n_stocks: int,
     ) -> pd.Series:
-        """Fraction of non-NaN components per stock (0-1).
+        """Hard exclusion for stocks with fewer than MIN_POPULATED_DIMS.
 
-        9 components total.  A stock with all 9 populated gets 1.0.
-        A stock with 6/9 gets ~0.93 (mild penalty via sqrt scaling).
-        A stock with 3/9 gets ~0.82 (meaningful penalty).
+        Stocks with sufficient data (>= MIN_POPULATED_DIMS) get 1.0 (no
+        penalty).  Stocks below the threshold get 0.0 (excluded from ranking).
+        This replaces the old sqrt scaling which was ad-hoc and let stocks
+        with 3/9 dims still rank competitively.
         """
         n_components = len(raw)
         non_nan_count = pd.Series(0, index=range(n_stocks), dtype=float)
         for component_values in raw.values():
             non_nan_count += (~component_values.isna()).astype(float)
-        # Sqrt scaling: not as harsh as linear, but still meaningful
-        return (non_nan_count / n_components).apply(np.sqrt)
+        min_dims = self.MIN_POPULATED_DIMS
+        # Binary: 1.0 if enough data, 0.0 if not
+        return (non_nan_count >= min_dims).astype(float)
 
     def _get_regime_weights(
         self, macro_regime: str, config: dict | None = None
@@ -323,7 +382,65 @@ class DynamicScreener:
 
         return weights
 
+    @staticmethod
+    def compute_ic_weights(
+        factor_scores: pd.DataFrame,
+        forward_returns: pd.Series,
+        base_weights: dict[str, float],
+        shrinkage: float = 0.5,
+    ) -> dict[str, float]:
+        """IC-weighted factor allocation shrunk toward base weights.
+
+        Parameters
+        ----------
+        factor_scores : DataFrame with columns matching base_weights keys,
+            rows are stocks.
+        forward_returns : Series of 1-period forward returns, aligned to rows.
+        base_weights : dict of factor_name -> weight (e.g. DEFAULT_WEIGHTS).
+        shrinkage : blend toward base_weights (0 = pure IC, 1 = pure base).
+
+        Returns
+        -------
+        dict of factor_name -> weight, summing to 1.0.
+        """
+        ic_raw = {}
+        for factor in base_weights:
+            if factor not in factor_scores.columns:
+                ic_raw[factor] = 0.0
+                continue
+            mask = factor_scores[factor].notna() & forward_returns.notna()
+            if mask.sum() < 20:
+                ic_raw[factor] = 0.0
+                continue
+            ic_raw[factor] = float(
+                factor_scores.loc[mask, factor].corr(
+                    forward_returns[mask], method="spearman"
+                )
+            )
+
+        # Clamp negative ICs to zero (don't short-weight factors)
+        ic_pos = {k: max(0.0, v) for k, v in ic_raw.items()}
+        ic_sum = sum(ic_pos.values())
+        if ic_sum <= 0:
+            return dict(base_weights)
+
+        ic_weights = {k: v / ic_sum for k, v in ic_pos.items()}
+
+        # Shrink toward base weights
+        blended = {}
+        for k in base_weights:
+            blended[k] = shrinkage * base_weights.get(k, 0) + (1 - shrinkage) * ic_weights.get(k, 0)
+
+        total = sum(blended.values())
+        if total > 0:
+            blended = {k: v / total for k, v in blended.items()}
+        return blended
+
     # ── Raw Value Extraction ──────────────────────────────────────────
+
+    # DCF upside bounds: cap extreme values that are almost certainly noise
+    DCF_UPSIDE_CAP = 2.0    # +200%
+    DCF_UPSIDE_FLOOR = -0.5  # -50%
 
     def _extract_raw_values(
         self,
@@ -331,6 +448,7 @@ class DynamicScreener:
         deep_fundamentals: dict[str, dict],
         dcf_results: dict[str, dict],
         info_map: dict[str, dict],
+        price_data: dict[str, pd.DataFrame] | None = None,
     ) -> dict[str, pd.Series]:
         """Extract raw numeric values for each scoring component.
 
@@ -346,6 +464,10 @@ class DynamicScreener:
         growth_vals = []
         blindspot_vals = []
         margin_vals = []
+        momentum_vals = []
+        low_vol_vals = []
+
+        price_data = price_data or {}
 
         for ticker in tickers:
             df = deep_fundamentals.get(ticker, {})
@@ -369,21 +491,24 @@ class DynamicScreener:
             interest_cov = _safe_float(df.get("interest_coverage"))
             balance_sheet_vals.append(_nanmean([altman, interest_cov]))
 
-            # DCF upside
-            dcf_upside_vals.append(_safe_float(dcf.get("dcf_upside_pct")))
+            # DCF upside — capped at [FLOOR, CAP] to reduce noise from
+            # extreme valuations that are almost certainly input errors
+            raw_dcf = _safe_float(dcf.get("dcf_upside_pct"))
+            if not np.isnan(raw_dcf):
+                raw_dcf = float(np.clip(raw_dcf, self.DCF_UPSIDE_FLOOR, self.DCF_UPSIDE_CAP))
+            dcf_upside_vals.append(raw_dcf)
 
-            # Income statement health: revenue growth, consistency,
-            # earnings persistence, operating trend, and peer-relative growth
+            # Income statement health: consistency, earnings persistence,
+            # and peer-relative growth.  Revenue growth is handled by
+            # Growth Momentum; operating margin trend by Margin Trajectory.
+            # De-duplicated to reduce multicollinearity.
             rev_growth = _safe_float(info.get("revenueGrowth"))
             rev_consistency = _safe_float(df.get("revenue_growth_consistency"))
-            # Invert consistency (lower std = better) so higher is better
             inv_consistency = -rev_consistency if not np.isnan(rev_consistency) else np.nan
             earn_persist = _safe_float(df.get("earnings_persistence"))
-            om_trend = _safe_float(df.get("operating_margin_4q_trend"))
-            # Industry-relative revenue growth percentile (0-1, already oriented)
             rev_industry_pctl = _safe_float(df.get("revenue_growth_industry_pctl"))
             income_health_vals.append(
-                _nanmean([rev_growth, inv_consistency, earn_persist, om_trend, rev_industry_pctl])
+                _nanmean([inv_consistency, earn_persist, rev_industry_pctl])
             )
 
             # Growth momentum: blend of revenue growth and earnings growth
@@ -395,7 +520,18 @@ class DynamicScreener:
 
             # Margin trajectory: average of gross and operating margin trends
             gm_trend = _safe_float(df.get("gross_margin_4q_trend"))
+            om_trend = _safe_float(df.get("operating_margin_4q_trend"))
             margin_vals.append(_nanmean([gm_trend, om_trend]))
+
+            # Price momentum: 12-1 month return (skip most recent month
+            # to avoid short-term reversal, per Jegadeesh-Titman 1993)
+            momentum_vals.append(
+                _compute_price_momentum(price_data.get(ticker))
+            )
+
+            # Low volatility: inverted 60-day realized vol (lower vol = higher score)
+            vol = _compute_realized_vol(price_data.get(ticker))
+            low_vol_vals.append(-vol if not np.isnan(vol) else np.nan)
 
         return {
             "piotroski": pd.Series(piotroski_vals),
@@ -407,6 +543,8 @@ class DynamicScreener:
             "growth_momentum": pd.Series(growth_vals),
             "blindspot": pd.Series(blindspot_vals),
             "margin_trajectory": pd.Series(margin_vals),
+            "price_momentum": pd.Series(momentum_vals),
+            "low_volatility": pd.Series(low_vol_vals),
         }
 
 
@@ -432,6 +570,47 @@ def _nanmean(values: list[float]) -> float:
     return float(np.mean(finite))
 
 
+def _compute_price_momentum(price_df: pd.DataFrame | None) -> float:
+    """12-1 month price momentum (skip most recent 21 trading days).
+
+    Returns the cumulative return from T-252 to T-21 trading days.
+    The 1-month skip avoids short-term reversal (Jegadeesh-Titman 1993).
+    """
+    if price_df is None or price_df.empty:
+        return np.nan
+    close = price_df.get("Close")
+    if close is None:
+        close = price_df.get("Adj Close")
+    if close is None or len(close) < 252:
+        return np.nan
+    try:
+        recent = float(close.iloc[-21])   # 1 month ago
+        older = float(close.iloc[-252])   # 12 months ago
+        if older <= 0 or np.isnan(older) or np.isnan(recent):
+            return np.nan
+        return (recent / older) - 1.0
+    except (IndexError, TypeError, ValueError):
+        return np.nan
+
+
+def _compute_realized_vol(price_df: pd.DataFrame | None, window: int = 60) -> float:
+    """Annualised realized volatility from daily log returns over *window* days."""
+    if price_df is None or price_df.empty:
+        return np.nan
+    close = price_df.get("Close")
+    if close is None:
+        close = price_df.get("Adj Close")
+    if close is None or len(close) < window + 1:
+        return np.nan
+    try:
+        log_ret = np.log(close.iloc[-window:] / close.iloc[-window:].shift(1)).dropna()
+        if len(log_ret) < window - 5:
+            return np.nan
+        return float(log_ret.std() * np.sqrt(252))
+    except (TypeError, ValueError):
+        return np.nan
+
+
 # ── Convenience function ──────────────────────────────────────────────
 
 
@@ -441,7 +620,11 @@ def rank_stocks_by_quality(
     info_map: dict[str, dict],
     macro_regime: str = "neutral",
     top_n: int = 100,
+    price_data: dict[str, pd.DataFrame] | None = None,
 ) -> list[str]:
     """Convenience function: screen and return top N tickers."""
     screener = DynamicScreener(top_n=top_n)
-    return screener.screen(deep_fundamentals, dcf_results, info_map, macro_regime)
+    return screener.screen(
+        deep_fundamentals, dcf_results, info_map, macro_regime,
+        price_data=price_data,
+    )
