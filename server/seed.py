@@ -296,6 +296,31 @@ def seed_live(db_path: str, config: dict) -> None:
             logger.warning("Verification failed for %s", ticker, exc_info=True)
             verification = {"all_passed": None, "summary": "Verification unavailable"}
 
+        # ── Scoring breakdown (per-component transparency) ──
+        weights = screener._get_regime_weights(macro_regime, config=config)
+        component_map = {
+            "piotroski": ("Piotroski F-Score", "piotroski_score"),
+            "cash_flow_quality": ("Cash Flow Quality", "cash_flow_score"),
+            "roic_spread": ("ROIC vs WACC", "roic_spread_score"),
+            "balance_sheet": ("Balance Sheet", "balance_sheet_score"),
+            "dcf_upside": ("DCF Upside", "dcf_score"),
+            "growth_momentum": ("Growth Momentum", "growth_score"),
+            "margin_trajectory": ("Margin Trajectory", "margin_score"),
+            "blindspot": ("Blindspot", "blindspot_score"),
+        }
+        scoring_breakdown = {}
+        for comp_key, (label, col) in component_map.items():
+            score = float(row.get(col, 0.5))
+            weight = weights.get(comp_key, 0)
+            scoring_breakdown[comp_key] = {
+                "label": label,
+                "score": round(score, 3),
+                "weight": round(weight, 3),
+                "contribution": round(score * weight, 4),
+            }
+        scoring_breakdown["composite_total"] = round(float(row.get("composite_score", 0)), 4)
+        scoring_breakdown["rank"] = int(row.get("rank", 0))
+
         analysis = {
             "ticker": ticker,
             "stock_category": "growth",
@@ -324,6 +349,8 @@ def seed_live(db_path: str, config: dict) -> None:
             "roi_analysis": roi_analysis,
             # Verification
             "verification": verification,
+            # Scoring breakdown
+            "scoring_breakdown": scoring_breakdown,
         }
 
         reasons = _build_reasons(deep, dcf, info)
@@ -351,6 +378,7 @@ def seed_live(db_path: str, config: dict) -> None:
             "cash_flow_score": row.get("cash_flow_score"),
             "balance_sheet_score": row.get("balance_sheet_score"),
             "dcf_score": row.get("dcf_score"),
+            "growth_score": row.get("growth_score"),
             "blindspot_score": row.get("blindspot_score"),
             "margin_score": row.get("margin_score"),
             "analysis": analysis,
@@ -580,6 +608,7 @@ def seed_live(db_path: str, config: dict) -> None:
             "ceo_info": ceo_info,
             "compensation": comp_info,
             "roi_analysis": roi_analysis,
+            "scoring_breakdown": scoring_breakdown,
             "technical": {"points": tech_points},
             "fundamental": {"points": fund_points},
             "macro": {"points": macro_points},

@@ -172,9 +172,9 @@
           <div class="dim-row">
             <div class="dim-header">
               <span class="dim-name">ROIC Spread</span>
-              <span class="dim-weight">14%</span>
+              <span class="dim-weight">16%</span>
             </div>
-            <div class="dim-track"><div class="dim-fill" data-width="70"></div></div>
+            <div class="dim-track"><div class="dim-fill" data-width="80"></div></div>
             <span class="dim-desc">Return on invested capital minus weighted average cost of capital</span>
           </div>
           <div class="dim-row">
@@ -187,27 +187,35 @@
           </div>
           <div class="dim-row">
             <div class="dim-header">
-              <span class="dim-name">Blindspot</span>
+              <span class="dim-name">DCF Upside</span>
               <span class="dim-weight">14%</span>
             </div>
             <div class="dim-track"><div class="dim-fill" data-width="70"></div></div>
-            <span class="dim-desc">Low analyst coverage, insider buying clusters, institutional under-ownership</span>
-          </div>
-          <div class="dim-row">
-            <div class="dim-header">
-              <span class="dim-name">DCF Upside</span>
-              <span class="dim-weight">12%</span>
-            </div>
-            <div class="dim-track"><div class="dim-fill" data-width="60"></div></div>
             <span class="dim-desc">5-year discounted cash flow intrinsic value vs market price, margin of safety</span>
           </div>
           <div class="dim-row">
             <div class="dim-header">
-              <span class="dim-name">Margin Trajectory</span>
+              <span class="dim-name">Growth Momentum</span>
               <span class="dim-weight">10%</span>
             </div>
             <div class="dim-track"><div class="dim-fill" data-width="50"></div></div>
+            <span class="dim-desc">Revenue growth and earnings growth blend &mdash; penalizes declining businesses</span>
+          </div>
+          <div class="dim-row">
+            <div class="dim-header">
+              <span class="dim-name">Margin Trajectory</span>
+              <span class="dim-weight">5%</span>
+            </div>
+            <div class="dim-track"><div class="dim-fill" data-width="25"></div></div>
             <span class="dim-desc">4-quarter rolling gross and operating margin trends vs sector peers</span>
+          </div>
+          <div class="dim-row">
+            <div class="dim-header">
+              <span class="dim-name">Blindspot</span>
+              <span class="dim-weight">5%</span>
+            </div>
+            <div class="dim-track"><div class="dim-fill" data-width="25"></div></div>
+            <span class="dim-desc">Low analyst coverage, insider buying clusters, institutional under-ownership</span>
           </div>
         </div>
       </div>
@@ -249,20 +257,20 @@
         <div class="regime-grid">
           <div class="regime-card">
             <span class="regime-tag">Risk-On</span>
-            <span class="regime-condition">VIX &lt; 20</span>
+            <span class="regime-condition">VIX &lt; 15</span>
             <div class="regime-shifts">
+              <span class="regime-shift">&uarr; Growth Momentum weight</span>
               <span class="regime-shift">&uarr; DCF Upside weight</span>
-              <span class="regime-shift">&uarr; Blindspot weight</span>
               <span class="regime-shift">&darr; Balance Sheet weight</span>
             </div>
           </div>
           <div class="regime-card">
             <span class="regime-tag">Risk-Off</span>
-            <span class="regime-condition">VIX &ge; 20</span>
+            <span class="regime-condition">VIX &gt; 25</span>
             <div class="regime-shifts">
               <span class="regime-shift">&uarr; Balance Sheet weight</span>
               <span class="regime-shift">&uarr; Cash Flow weight</span>
-              <span class="regime-shift">&darr; DCF Upside weight</span>
+              <span class="regime-shift">&darr; Growth Momentum weight</span>
             </div>
           </div>
         </div>

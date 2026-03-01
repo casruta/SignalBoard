@@ -1,9 +1,10 @@
-"""Dynamic screening: adaptive composite ranking to find under-the-radar quality stocks.
+"""Dynamic screening: adaptive composite ranking via 8-dimension fundamentals model.
 
 Replaces rigid threshold filters (ROE>12%, D/E<2, P/E<35) with an adaptive
-composite ranking system that thinks like a professional analyst.  Instead of
-AND-filters that exclude stocks for failing one criterion, stocks are scored
-holistically so strength in one area can compensate for weakness in another.
+composite ranking system.  Stocks are scored holistically across 8 dimensions
+(Piotroski, cash flow quality, ROIC spread, balance sheet, DCF upside, growth
+momentum, margin trajectory, blindspot) so strength in one area can compensate
+for weakness in another.  Weights are fundamentals-first and config-driven.
 """
 
 from __future__ import annotations
@@ -23,15 +24,16 @@ class DynamicScreener:
     to market regime and evaluates stocks holistically.
     """
 
-    # Default component weights (sum to 1.0) — tuned for small-mid cap focus
+    # Default component weights (sum to 1.0) — fundamentals-first, numbers-driven
     DEFAULT_WEIGHTS = {
         "piotroski": 0.18,
-        "roic_spread": 0.14,
         "cash_flow_quality": 0.18,    # critical for small caps
+        "roic_spread": 0.16,          # direct value creation measure
         "balance_sheet": 0.14,
-        "dcf_upside": 0.12,           # less reliable for small caps
-        "blindspot": 0.14,            # key differentiator for under-covered stocks
-        "margin_trajectory": 0.10,
+        "dcf_upside": 0.14,           # valuation upside
+        "growth_momentum": 0.10,      # revenue + earnings growth
+        "margin_trajectory": 0.05,
+        "blindspot": 0.05,            # minor — coverage gap is noise
     }
 
     # Regime adjustments: multiply default weights by these factors
@@ -40,10 +42,12 @@ class DynamicScreener:
             "balance_sheet": 1.5,
             "cash_flow_quality": 1.3,
             "dcf_upside": 0.7,
+            "growth_momentum": 0.7,
             "margin_trajectory": 0.8,
         },
         "risk_on": {
             "dcf_upside": 1.4,
+            "growth_momentum": 1.5,
             "margin_trajectory": 1.3,
             "balance_sheet": 0.8,
             "blindspot": 0.8,
@@ -68,7 +72,7 @@ class DynamicScreener:
 
         Steps:
         1. Apply hard safety filters (can't score your way past these)
-        2. Compute 7 component scores per stock (0-1 range, percentile-ranked)
+        2. Compute 8 component scores per stock (0-1 range, percentile-ranked)
         3. Apply regime-adjusted weights
         4. Sort by composite score, return top N
         """
@@ -100,7 +104,7 @@ class DynamicScreener:
         Returns DataFrame with columns:
         - ticker, composite_score, rank
         - piotroski_score, roic_spread_score, cash_flow_score,
-          balance_sheet_score, dcf_score, blindspot_score, margin_score
+          balance_sheet_score, dcf_score, growth_score, blindspot_score, margin_score
         - passes_safety (bool)
         """
         tickers = sorted(
@@ -119,6 +123,7 @@ class DynamicScreener:
         scored["cash_flow_score"] = self._score_component(raw["cash_flow_quality"])
         scored["balance_sheet_score"] = self._score_component(raw["balance_sheet"])
         scored["dcf_score"] = self._score_component(raw["dcf_upside"])
+        scored["growth_score"] = self._score_component(raw["growth_momentum"])
         scored["blindspot_score"] = self._score_component(raw["blindspot"])
         scored["margin_score"] = self._score_component(raw["margin_trajectory"])
 
@@ -130,14 +135,15 @@ class DynamicScreener:
             for t in tickers
         ]
 
-        # Weighted composite
-        weights = self._get_regime_weights(macro_regime)
+        # Weighted composite — use config overrides if provided
+        weights = self._get_regime_weights(macro_regime, config=config)
         component_columns = {
             "piotroski": "piotroski_score",
             "roic_spread": "roic_spread_score",
             "cash_flow_quality": "cash_flow_score",
             "balance_sheet": "balance_sheet_score",
             "dcf_upside": "dcf_score",
+            "growth_momentum": "growth_score",
             "blindspot": "blindspot_score",
             "margin_trajectory": "margin_score",
         }
@@ -208,9 +214,18 @@ class DynamicScreener:
         filled.loc[mask] = 0.5
         return filled
 
-    def _get_regime_weights(self, macro_regime: str) -> dict:
-        """Apply regime adjustments to default weights, then renormalize to sum=1."""
-        weights = dict(self.DEFAULT_WEIGHTS)
+    def _get_regime_weights(
+        self, macro_regime: str, config: dict | None = None
+    ) -> dict:
+        """Apply regime adjustments to default weights, then renormalize to sum=1.
+
+        If config["screening"]["weights"] exists, use those as the base weights
+        instead of DEFAULT_WEIGHTS.
+        """
+        config_weights = (
+            config.get("screening", {}).get("weights") if config else None
+        )
+        weights = dict(config_weights if config_weights else self.DEFAULT_WEIGHTS)
         adjustments = self.REGIME_ADJUSTMENTS.get(macro_regime, {})
 
         for component, factor in adjustments.items():
@@ -242,12 +257,14 @@ class DynamicScreener:
         cash_flow_vals = []
         balance_sheet_vals = []
         dcf_upside_vals = []
+        growth_vals = []
         blindspot_vals = []
         margin_vals = []
 
         for ticker in tickers:
             df = deep_fundamentals.get(ticker, {})
             dcf = dcf_results.get(ticker, {})
+            info = info_map.get(ticker, {})
 
             # Piotroski F-Score (0-9)
             piotroski_vals.append(_safe_float(df.get("piotroski_f_score")))
@@ -269,6 +286,11 @@ class DynamicScreener:
             # DCF upside
             dcf_upside_vals.append(_safe_float(dcf.get("dcf_upside_pct")))
 
+            # Growth momentum: blend of revenue growth and earnings growth
+            rev_growth = _safe_float(info.get("revenueGrowth"))
+            earn_growth = _safe_float(info.get("earningsGrowth"))
+            growth_vals.append(_nanmean([rev_growth, earn_growth]))
+
             # Blindspot (institutional analysis)
             blindspot_vals.append(_safe_float(df.get("blindspot_score")))
 
@@ -283,6 +305,7 @@ class DynamicScreener:
             "cash_flow_quality": pd.Series(cash_flow_vals),
             "balance_sheet": pd.Series(balance_sheet_vals),
             "dcf_upside": pd.Series(dcf_upside_vals),
+            "growth_momentum": pd.Series(growth_vals),
             "blindspot": pd.Series(blindspot_vals),
             "margin_trajectory": pd.Series(margin_vals),
         }

@@ -140,11 +140,12 @@
             html += '<div class="score-bars">';
             html += miniBar("Piotroski", s.piotroski_score);
             html += miniBar("Cash Flow", s.cash_flow_score);
-            html += miniBar("DCF", s.dcf_score);
-            html += miniBar("Balance Sheet", s.balance_sheet_score);
-            html += miniBar("Blindspot", s.blindspot_score);
-            html += miniBar("Margins", s.margin_score);
             html += miniBar("ROIC Spread", s.roic_spread_score);
+            html += miniBar("Balance Sheet", s.balance_sheet_score);
+            html += miniBar("DCF", s.dcf_score);
+            html += miniBar("Growth", s.growth_score);
+            html += miniBar("Margins", s.margin_score);
+            html += miniBar("Blindspot", s.blindspot_score);
             if (s.stock_category === 'dividend' && s.analysis && s.analysis.dividend_yield != null) {
                 html += '<div class="mini-bar"><span class="div-yield-indicator">DIV YIELD ' + (s.analysis.dividend_yield * 100).toFixed(1) + '%</span></div>';
             } else if (s.stock_category === 'dividend' && s.dividend_yield != null) {
@@ -272,7 +273,8 @@
                 { id: "profitability", title: "Profitability & Efficiency", html: renderProfitability(data.profitability) },
                 { id: "ceoinfo", title: "CEO & Leadership", html: renderCEOInfo(data.ceo_info) },
                 { id: "compensation", title: "Compensation Structure", html: renderCompensation(data.compensation) },
-                { id: "roi", title: "ROI Analysis", html: renderROI(data.roi) },
+                { id: "roi", title: "ROI Analysis", html: renderROI(data.roi_analysis) },
+                { id: "scoring", title: "Scoring Model Breakdown", html: renderScoringBreakdown(data.scoring_breakdown) },
                 { id: "catalysts", title: "Catalysts & Events", html: renderCatalysts(data.catalysts) },
                 { id: "moat", title: "Competitive Moat", html: renderMoat(data.moat) },
                 { id: "risks", title: "Risk Factors", html: renderRisks(data.risks) },
@@ -715,6 +717,35 @@
             if (roi.current_price) {
                 html += '<tr><td>Current Price</td><td>' + fmtUSD(roi.current_price) + '</td></tr>';
             }
+            html += '</tbody></table></div>';
+            return html;
+        }
+
+        function renderScoringBreakdown(scoring) {
+            if (!scoring || !scoring.has_data || !scoring.components) return '';
+            var comps = scoring.components;
+            var html = '<div class="report-card">';
+            html += '<div class="card-accent"></div>';
+            html += '<table class="data-tbl scoring-breakdown"><tbody>';
+            html += '<tr class="sub-header"><td>Component</td><td>Score</td><td>Weight</td><td>Contribution</td><td></td></tr>';
+            for (var i = 0; i < comps.length; i++) {
+                var c = comps[i];
+                var pct = Math.round(c.score * 100);
+                html += '<tr>';
+                html += '<td>' + escapeHtml(c.label) + '</td>';
+                html += '<td class="num">' + c.score.toFixed(2) + '</td>';
+                html += '<td class="num">' + (c.weight * 100).toFixed(1) + '%</td>';
+                html += '<td class="num">' + c.contribution.toFixed(3) + '</td>';
+                html += '<td class="bar-cell"><div class="scoring-bar-track"><div class="scoring-bar-fill" style="width:' + pct + '%"></div></div></td>';
+                html += '</tr>';
+            }
+            // Composite total row
+            html += '<tr class="composite-row">';
+            html += '<td>Composite Score</td>';
+            html += '<td class="num" style="font-weight:500">' + (scoring.composite_total != null ? scoring.composite_total.toFixed(3) : '—') + '</td>';
+            html += '<td></td><td></td>';
+            html += '<td class="num">Rank #' + (scoring.rank || '—') + '</td>';
+            html += '</tr>';
             html += '</tbody></table></div>';
             return html;
         }

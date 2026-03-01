@@ -446,6 +446,35 @@ def _build_compensation(signal: dict) -> dict:
     }
 
 
+def _build_scoring_breakdown(signal: dict) -> dict:
+    """Build scoring model breakdown section from signal data."""
+    bd = signal.get("scoring_breakdown")
+    if not bd:
+        return {"has_data": False}
+
+    # Order components by contribution descending
+    components = []
+    for key in ["piotroski", "cash_flow_quality", "roic_spread", "balance_sheet",
+                "dcf_upside", "growth_momentum", "margin_trajectory", "blindspot"]:
+        entry = bd.get(key)
+        if entry:
+            components.append({
+                "key": key,
+                "label": entry["label"],
+                "score": entry["score"],
+                "weight": entry["weight"],
+                "contribution": entry["contribution"],
+            })
+    components.sort(key=lambda c: c["contribution"], reverse=True)
+
+    return {
+        "has_data": True,
+        "components": components,
+        "composite_total": bd.get("composite_total"),
+        "rank": bd.get("rank"),
+    }
+
+
 def _build_roi(signal: dict, anchors: _Anchors, p: dict, price: float) -> dict:
     """Build ROI analysis section."""
     roi = signal.get("roi_analysis") or {}
@@ -545,6 +574,7 @@ def generate_mock_report(signal: dict) -> dict:
     _ceo = _build_ceo_info(signal)
     _comp_sec = _build_compensation(signal)
     _roi = _build_roi(signal, anc, p, price)
+    _scoring = _build_scoring_breakdown(signal)
     summaries = {
         "thesis": f"{rat}. {up:+.1%} upside to ${bl:.2f}. EV/Rev {p['ev_rev']:.1f}x vs {comps['peer_median']['ev_revenue']:.1f}x peer median.",
         "snapshot": f"{_fmt_m(mc)} cap, {p['beta']:.2f} beta, {snap['short_interest_pct']:.1%} SI. 52w range ${snap['range_52w_low']:.0f}\u2013${snap['range_52w_high']:.0f}.",
@@ -566,6 +596,7 @@ def generate_mock_report(signal: dict) -> dict:
         "ceo": _ceo["note"] if _ceo else None,
         "compensation": _comp_sec.get("alignment_note") if _comp_sec.get("has_data") else "Compensation data unavailable",
         "roi": f"Total ROI {_roi['total_roi_pct']:.1%} ({_roi['capital_gain_pct']:.1%} capital + {_roi['income_return_pct']:.1%} income). Risk-adjusted: {_roi['risk_adjusted_roi']:.1%}." if _roi.get("total_roi_pct") is not None else None,
+        "scoring": f"Composite {_scoring['composite_total']:.3f}, rank #{_scoring['rank']}. Top driver: {_scoring['components'][0]['label']} ({_scoring['components'][0]['contribution']:.3f})." if _scoring.get("has_data") and _scoring.get("components") else None,
     }
     return {
         "header":{"ticker":signal["ticker"],"name":signal.get("short_name",""),"sector":sec,
@@ -598,4 +629,5 @@ def generate_mock_report(signal: dict) -> dict:
         "ceo_info": _ceo,
         "compensation": _comp_sec,
         "roi_analysis": _roi,
+        "scoring_breakdown": _scoring,
         "section_summaries":summaries}
