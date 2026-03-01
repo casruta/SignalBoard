@@ -60,6 +60,7 @@ class ScreenedStockRow(Base):
     dcf_score = Column(Float)
     blindspot_score = Column(Float)
     margin_score = Column(Float)
+    stock_category = Column(String(20))
     # Key metrics for display
     payload = Column(Text)  # Full analysis JSON (DCF, deep fundamentals, etc.)
     generated_at = Column(DateTime, default=datetime.utcnow, index=True)
@@ -186,6 +187,7 @@ class Database:
                     dcf_score=s.get("dcf_score"),
                     blindspot_score=s.get("blindspot_score"),
                     margin_score=s.get("margin_score"),
+                    stock_category=s.get("stock_category", ""),
                     payload=json.dumps(s.get("analysis", {})),
                     generated_at=datetime.utcnow(),
                 )
@@ -217,6 +219,7 @@ class Database:
                     "dcf_score": r.dcf_score,
                     "blindspot_score": r.blindspot_score,
                     "margin_score": r.margin_score,
+                    "stock_category": r.stock_category,
                     "generated_at": r.generated_at.isoformat() if r.generated_at else None,
                 }
                 for r in rows
@@ -248,6 +251,7 @@ class Database:
                 "dcf_score": row.dcf_score,
                 "blindspot_score": row.blindspot_score,
                 "margin_score": row.margin_score,
+                "stock_category": row.stock_category,
                 "generated_at": row.generated_at.isoformat() if row.generated_at else None,
             }
             if row.payload:

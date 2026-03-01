@@ -174,9 +174,11 @@ class FinancialStatementLoader:
                 try:
                     raw = getattr(t, yf_attr, None)
                     if raw is not None and not raw.empty:
-                        # yfinance returns columns as dates; transpose so
-                        # rows are periods and columns are line items.
-                        result[key] = raw.T.sort_index()
+                        # yfinance returns line items as rows and dates as
+                        # columns (most-recent first).  Keep that layout —
+                        # downstream modules (dcf_valuation, fundamental_deep)
+                        # expect line items in the index.
+                        result[key] = raw
                 except Exception:
                     logger.debug("yfinance %s failed for %s", yf_attr, ticker)
 
@@ -287,9 +289,13 @@ class FinancialStatementLoader:
                 return None
             result[key] = self._load_cache(path)
 
-        # Info is not cached separately; re-fetch is cheap relative to
-        # statements, and the statements are the expensive part.
-        result["info"] = {}
+        # Info is not cached separately; re-fetch from yfinance since it's
+        # cheap relative to statements and required for market cap, beta, etc.
+        try:
+            result["info"] = yf.Ticker(ticker).info or {}
+        except Exception:
+            logger.debug("yfinance info re-fetch failed for %s (cache hit)", ticker)
+            result["info"] = {}
         result["source"] = "cache"
         logger.debug("Cache hit for %s (all statements)", ticker)
         return result

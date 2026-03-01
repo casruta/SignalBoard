@@ -35,6 +35,7 @@ _NAMES = {
     "AZEK": "AZEK Company", "BLDR": "Builders FirstSource", "VMC": "Vulcan Materials",
     "MLM": "Martin Marietta", "EXP": "Eagle Materials",
     "CVNA": "Carvana", "DASH": "DoorDash", "RBLX": "Roblox",
+    "HCKT": "The Hackett Group", "JJSF": "J&J Snack Foods", "EPAC": "Enerpac Tool Group",
 }
 
 # Sector defaults: gm, om, nm, ev/rev, tax, d&a%, capex%, div_yield, beta
@@ -47,14 +48,15 @@ _SD = {
     "Financials":   (.70,.30,.22, 4.0,.21,.02,.02,.01,  1.15),
     "Materials":    (.25,.12,.08, 1.2,.23,.06,.07,.015, 1.2),
     "Consumer Staples": (.35,.08,.04, 1.0,.23,.04,.04,.02, 0.8),
+    "Consumer Defensive": (.35,.08,.04, 1.0,.23,.04,.04,.02, 0.8),
     "Utilities":    (.30,.10,.05, 2.0,.22,.06,.15,.03, 0.9),
 }
 _SD_KEYS = ("gm","om","nm","ev_rev","tax","dna","capex","div","beta")
 _DFLT = (.40,.12,.07, 2.5,.22,.05,.05,.01, 1.0)
 _SMAP = {"Energy":"energy","Technology":"technology","Consumer Discretionary":"consumer_discretionary",
     "Healthcare":"healthcare","Industrials":"industrials","Financials":"financials",
-    "Materials":"materials","Consumer Staples":"consumer_staples","Utilities":"utilities",
-    "Communication Services":"communication_services","Real Estate":"real_estate"}
+    "Materials":"materials","Consumer Staples":"consumer_staples","Consumer Defensive":"consumer_staples",
+    "Utilities":"utilities","Communication Services":"communication_services","Real Estate":"real_estate"}
 
 
 @dataclass
@@ -69,6 +71,7 @@ class _Anchors:
     op_loss_quarterly: Optional[float] = None; short_interest: Optional[float] = None
     buyback_yield: Optional[float] = None; fcf_conversion: Optional[float] = None
     dilution_pct: Optional[float] = None
+    dividend_yield: Optional[float] = None; payout_ratio: Optional[float] = None
 
 
 def _dollar_val(m) -> float:
@@ -123,6 +126,11 @@ def _parse_anchors(signal: dict) -> _Anchors:
     if v: a.fcf_conversion = float(v)/100
     v = _s(r'(\d+(?:\.\d+)?)%\s*dilution');
     if v: a.dilution_pct = float(v)/100
+    # Dividend-related metrics (require "dividend" prefix to avoid matching FCF yield)
+    v = _s(r'[Dd]ividend\s+yield\s*(\d+(?:\.\d+)?)%')
+    if v: a.dividend_yield = float(v)/100
+    v = _s(r'payout\s*ratio\s*(\d+(?:\.\d+)?)%')
+    if v: a.payout_ratio = float(v)/100
     return a
 
 
@@ -341,6 +349,122 @@ def _moat(sec: str, pio: Optional[int], roic: float, wacc: float) -> dict:
     return {"rating":r,"description":d,"tam":tam_vals.get(sec,200e9),"market_share":round(random.uniform(0.005,0.03),4)}
 
 
+def _build_ddm(anchors: _Anchors, sector: str, p: dict, price: float) -> dict:
+    """Build Gordon Growth Model / Dividend Discount Model section."""
+    div_yield = anchors.dividend_yield or p["div"] or 0.025
+    d0 = price * div_yield
+
+    # Growth rate assumptions
+    roe = anchors.roic or 0.12  # approximate ROE from ROIC
+    eps_est = max(price * 0.05, 0.01)  # rough EPS fallback
+    payout = min(div_yield * price / eps_est, 0.95)
+    sustainable_g = min(roe * (1 - payout), 0.08)
+    sector_terminal = {"Energy": 0.015, "Consumer Staples": 0.02, "Technology": 0.035,
+                       "Healthcare": 0.03, "Industrials": 0.02, "Financials": 0.025,
+                       "Materials": 0.015, "Consumer Discretionary": 0.025,
+                       "Utilities": 0.015}.get(sector, 0.02)
+    g = min(sustainable_g, sector_terminal * 1.5)
+
+    beta = anchors.beta or p["beta"] or 1.0
+    rf = 0.04
+    erp = 0.06
+    r = rf + beta * erp
+
+    # Single-stage DDM
+    d1 = d0 * (1 + g)
+    if r > g:
+        intrinsic = d1 / (r - g)
+    else:
+        intrinsic = price  # fallback
+
+    # Sensitivity table: rows = required return (r), cols = growth rate (g)
+    r_range = [r - 0.02, r - 0.01, r, r + 0.01, r + 0.02]
+    g_range = [g - 0.01, g - 0.005, g, g + 0.005, g + 0.01]
+    sensitivity = []
+    for ri in r_range:
+        row_vals = []
+        for gi in g_range:
+            if ri > gi and ri > 0:
+                val = d1 * (1 + gi - g) / (ri - gi)
+                row_vals.append(round(val, 2))
+            else:
+                row_vals.append(None)
+        sensitivity.append({"r": round(ri, 4), "values": row_vals})
+
+    return {
+        "model": "Gordon Growth (DDM)",
+        "assumptions": {
+            "current_dividend": round(d0, 2),
+            "next_year_dividend": round(d1, 2),
+            "sustainable_growth": round(sustainable_g, 4),
+            "growth_rate_used": round(g, 4),
+            "required_return": round(r, 4),
+            "cost_of_equity_method": "CAPM",
+        },
+        "output": {
+            "intrinsic_value": round(intrinsic, 2),
+            "current_price": round(price, 2),
+            "upside": round((intrinsic / price - 1), 4),
+            "margin_of_safety": round((intrinsic - price) / max(intrinsic, 0.01), 4),
+        },
+        "sensitivity": {
+            "row_label": "Required Return",
+            "col_label": "Dividend Growth Rate",
+            "g_values": [round(gi, 4) for gi in g_range],
+            "rows": sensitivity,
+        },
+    }
+
+
+def _build_ceo_info(signal: dict) -> dict:
+    """Build CEO information section from signal data."""
+    ceo_data = signal.get("ceo_info") or {}
+    return {
+        "ceo_changed_recently": ceo_data.get("ceo_changed_recently"),
+        "change_date": ceo_data.get("change_date"),
+        "filing_url": ceo_data.get("filing_url"),
+        "has_data": ceo_data.get("has_data", False),
+        "note": "CEO changed within past 2 years — monitor management transition" if ceo_data.get("ceo_changed_recently") else "No recent CEO change detected",
+    }
+
+
+def _build_compensation(signal: dict) -> dict:
+    """Build executive compensation structure section."""
+    comp = signal.get("compensation") or {}
+    if not comp.get("has_data"):
+        return {"has_data": False, "note": "Compensation data unavailable"}
+
+    return {
+        "has_data": True,
+        "equity_heavy": comp.get("equity_heavy"),
+        "equity_pct": comp.get("equity_pct"),
+        "cash_pct": comp.get("cash_pct"),
+        "total_ceo_compensation": comp.get("total_ceo_compensation"),
+        "latest_proxy_date": comp.get("latest_proxy_date"),
+        "filing_url": comp.get("filing_url"),
+        "alignment_note": "Equity-heavy compensation suggests management-shareholder alignment" if comp.get("equity_heavy") else "Cash-heavy compensation — review incentive alignment",
+    }
+
+
+def _build_roi(signal: dict, anchors: _Anchors, p: dict, price: float) -> dict:
+    """Build ROI analysis section."""
+    roi = signal.get("roi_analysis") or {}
+    if not roi:
+        target = signal.get("take_profit", price * 1.08)
+        div_yield = anchors.dividend_yield or p["div"] or 0
+        beta = anchors.beta or p["beta"] or 1.0
+        if price > 0:
+            cap_gain = (target - price) / price
+            total = cap_gain + div_yield
+            roi = {
+                "total_roi_pct": round(total, 4),
+                "capital_gain_pct": round(cap_gain, 4),
+                "income_return_pct": round(div_yield, 4),
+                "risk_adjusted_roi": round(total / max(beta, 0.3), 4),
+            }
+    return roi
+
+
 def generate_mock_report(signal: dict) -> dict:
     """Generate a comprehensive, internally-consistent mock equity research report."""
     random.seed(hash(signal["ticker"]))
@@ -374,7 +498,7 @@ def generate_mock_report(signal: dict) -> dict:
     # Risks
     _sev_cycle = ["High", "Medium", "Low"]
     _prob_cycle = ["High", "Moderate", "Low"]
-    raw_risks = [s.strip() for s in re.split(r'[.]', signal.get("risk_context","")) if len(s.strip()) > 10]
+    raw_risks = [s.strip() for s in re.split(r'(?<!\d)\.(?!\d)', signal.get("risk_context","")) if len(s.strip()) > 10]
     rsks = [{"factor": s, "severity": _sev_cycle[i % 3], "probability": _prob_cycle[i % 3],
              "detail": f"{s}. This could materially impact {'revenue growth' if i % 3 == 0 else 'margin trajectory' if i % 3 == 1 else 'investor sentiment'} over the next 12 months."}
             for i, s in enumerate(raw_risks)]
@@ -416,6 +540,11 @@ def generate_mock_report(signal: dict) -> dict:
     iv_gap = round((iv_avg/price - 1)*100, 1) if price else 0
     high_risk_ct = sum(1 for r in rsks if r["severity"] == "High")
     roic_spread = round((p["roic"] - p["wacc"])*10000)
+    # Pre-compute new sections for summaries
+    _ddm = _build_ddm(anc, sec, p, price) if (signal.get("category") == "dividend" or (anc.dividend_yield or p["div"] or 0) > 0.015) else None
+    _ceo = _build_ceo_info(signal)
+    _comp_sec = _build_compensation(signal)
+    _roi = _build_roi(signal, anc, p, price)
     summaries = {
         "thesis": f"{rat}. {up:+.1%} upside to ${bl:.2f}. EV/Rev {p['ev_rev']:.1f}x vs {comps['peer_median']['ev_revenue']:.1f}x peer median.",
         "snapshot": f"{_fmt_m(mc)} cap, {p['beta']:.2f} beta, {snap['short_interest_pct']:.1%} SI. 52w range ${snap['range_52w_low']:.0f}\u2013${snap['range_52w_high']:.0f}.",
@@ -433,6 +562,10 @@ def generate_mock_report(signal: dict) -> dict:
         "viewchangers": f"Bull: revenue above {abs(p['rg'])*100+5:.0f}%, margin expansion. Bear: growth below {max(abs(p['rg'])*100-8,0):.0f}%, guidance cut.",
         "pricetarget": f"Blended ${bl:.2f}: DCF ${dp:.2f} (50%), comps ${ca:.2f} (30%), technical ${tt:.2f} (20%).",
         "verdict": f"{rat} at {conf:.0%} confidence. ${bl:.2f} target = {up:+.1%} upside.",
+        "ddm": f"DDM intrinsic ${_ddm['output']['intrinsic_value']:.2f}, {_ddm['output']['upside']:.0%} upside using {_ddm['assumptions']['growth_rate_used']:.1%} growth." if _ddm else None,
+        "ceo": _ceo["note"] if _ceo else None,
+        "compensation": _comp_sec.get("alignment_note") if _comp_sec.get("has_data") else "Compensation data unavailable",
+        "roi": f"Total ROI {_roi['total_roi_pct']:.1%} ({_roi['capital_gain_pct']:.1%} capital + {_roi['income_return_pct']:.1%} income). Risk-adjusted: {_roi['risk_adjusted_roi']:.1%}." if _roi.get("total_roi_pct") is not None else None,
     }
     return {
         "header":{"ticker":signal["ticker"],"name":signal.get("short_name",""),"sector":sec,
@@ -461,4 +594,8 @@ def generate_mock_report(signal: dict) -> dict:
             "blended":round(bl,2)},
         "verdict":{"rating":rat,"price_target":round(bl,2),"confidence":round(conf,4),
             "summary":f"{rat} with {bl:.2f} price target ({up:+.1%} upside). {signal.get('ml_insight','')}"},
+        "ddm": _ddm,
+        "ceo_info": _ceo,
+        "compensation": _comp_sec,
+        "roi_analysis": _roi,
         "section_summaries":summaries}

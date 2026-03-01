@@ -338,6 +338,11 @@ def cmd_screen(config: dict):
         info_map[ticker] = info
         try:
             deep_fund_map[ticker] = compute_deep_fundamentals(stmts, info)
+            # Count available quarters for the safety filter
+            qi = stmts.get("quarterly_income")
+            deep_fund_map[ticker]["quarters_available"] = (
+                qi.shape[1] if qi is not None and not qi.empty else 0
+            )
         except Exception as e:
             logger.debug("Deep fundamentals failed for %s: %s", ticker, e)
         try:
@@ -413,10 +418,11 @@ def cmd_screen(config: dict):
 
 
 def cmd_seed(config: dict):
-    """Seed the database with mock trading recommendations."""
-    from server.seed import seed
+    """Seed the database with live screener data + mock recommendations."""
+    from server.seed import seed, seed_live
     db_path = config["server"]["database_path"]
     seed(db_path)
+    seed_live(db_path, config)
     logger.info("Database seeded successfully")
 
 

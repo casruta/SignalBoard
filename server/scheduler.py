@@ -417,6 +417,45 @@ def _build_analysis_payload(
     if ev_fcf is not None and ev_fcf > 0:
         payload["ev_to_fcf"] = ev_fcf
 
+    # Forward outlook fields (already computed by fundamental_deep, not yet surfaced)
+    for key in ("roe_4q_trend", "roic_4q_trend", "net_margin_4q_trend",
+                "ocf_margin_4q_trend", "revenue_acceleration",
+                "fcf_growth_3yr_cagr", "earnings_persistence",
+                "continuous_piotroski", "blindspot_score"):
+        val = deep.get(key)
+        if val is not None and not (isinstance(val, float) and np.isnan(val)):
+            payload[key] = val
+
+    # Implied growth rate from DCF
+    ig = dcf.get("implied_growth_rate")
+    if ig is not None and not np.isnan(ig):
+        payload["implied_growth_rate"] = ig
+
+    # Synthesize forward direction from trend slopes
+    trend_keys = ("roe_4q_trend", "roic_4q_trend", "gross_margin_4q_trend",
+                  "operating_margin_4q_trend", "net_margin_4q_trend",
+                  "ocf_margin_4q_trend")
+    trends = [deep.get(k) for k in trend_keys]
+    trends = [t for t in trends if t is not None and not np.isnan(t)]
+    if trends:
+        improving = sum(1 for t in trends if t > 0.01)
+        declining = sum(1 for t in trends if t < -0.01)
+        total = len(trends)
+        if improving > total / 2:
+            direction = "improving"
+            agreement = improving
+        elif declining > total / 2:
+            direction = "deteriorating"
+            agreement = declining
+        else:
+            direction = "stable"
+            agreement = total - improving - declining
+        payload["forward_outlook"] = {
+            "direction": direction,
+            "trend_agreement": agreement,
+            "trend_count": total,
+        }
+
     payload["reasons"] = reasons
     payload["market_cap"] = info.get("marketCap")
     payload["pe_ratio"] = info.get("trailingPE")

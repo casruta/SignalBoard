@@ -25,9 +25,14 @@ def fetch_fundamentals(ticker: str, force_refresh: bool = False) -> dict:
         cached = pd.read_parquet(cache)
         # Refresh if older than 7 days
         if not cached.empty:
-            age = pd.Timestamp.now() - cached.attrs.get(
-                "fetched_at", pd.Timestamp("2000-01-01")
-            )
+            fetched_at = cached.attrs.get("fetched_at", None)
+            if fetched_at is not None:
+                if isinstance(fetched_at, str):
+                    fetched_at = pd.Timestamp(fetched_at)
+                age = pd.Timestamp.now() - fetched_at
+            else:
+                # attrs don't survive parquet round-trips; use file mtime
+                age = pd.Timestamp.now() - pd.Timestamp.fromtimestamp(cache.stat().st_mtime)
             if age < pd.Timedelta(days=7):
                 return cached.iloc[0].to_dict()
 

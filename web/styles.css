@@ -895,6 +895,116 @@ body[data-page="detail"] {
   text-align: right;
 }
 
+/* ── Forward Outlook section ──────────────────────────────── */
+
+.outlook-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.outlook-direction {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  padding: 4px 10px;
+  border-radius: 2px;
+}
+
+.outlook-dir-improving {
+  background: rgba(26, 26, 26, 0.06);
+  border-left: 3px solid rgba(26, 26, 26, 0.35);
+}
+
+.outlook-dir-deteriorating {
+  background: rgba(26, 26, 26, 0.04);
+  border-left: 3px solid rgba(26, 26, 26, 0.18);
+}
+
+.outlook-dir-stable {
+  background: rgba(26, 26, 26, 0.03);
+  border-left: 3px solid rgba(26, 26, 26, 0.12);
+}
+
+.outlook-arrow {
+  font-size: 0.9rem;
+}
+
+.outlook-agreement {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.outlook-subheading {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.outlook-trends {
+  margin-bottom: 16px;
+}
+
+.trend-row {
+  display: flex;
+  align-items: baseline;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(212, 208, 200, 0.3);
+}
+
+.trend-row:last-child {
+  border-bottom: none;
+}
+
+.trend-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  color: var(--muted);
+  flex: 1;
+}
+
+.trend-indicator {
+  font-size: 0.6rem;
+  width: 20px;
+  text-align: center;
+}
+
+.trend-indicator.trend-up { color: rgba(26, 26, 26, 0.65); }
+.trend-indicator.trend-down { color: rgba(26, 26, 26, 0.35); }
+.trend-indicator.trend-flat { color: rgba(26, 26, 26, 0.2); }
+
+.trend-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: 400;
+  width: 70px;
+  text-align: right;
+}
+
+.outlook-signals {
+  margin-bottom: 12px;
+}
+
+.outlook-insider {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  padding: 8px 10px;
+  margin-top: 12px;
+  background: rgba(26, 26, 26, 0.04);
+  border-left: 3px solid rgba(26, 26, 26, 0.2);
+}
+
+.outlook-insider-label {
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
 /* ── Empty / loading states ───────────────────────────────── */
 
 .empty-state {

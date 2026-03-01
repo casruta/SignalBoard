@@ -161,7 +161,7 @@ class DynamicScreener:
     ) -> bool:
         """Hard safety filters that cannot be compensated:
 
-        - altman_z_score > 1.81  (not in distress zone)
+        - altman_z_score > 3.0  (safe zone only, excludes grey zone)
         - market_cap between min ($300M) and max ($20B) — configurable
         - At minimum 2 quarters of data available
 
@@ -176,8 +176,11 @@ class DynamicScreener:
         if np.isnan(market_cap) or market_cap < min_cap or market_cap > max_cap:
             return False
 
+        min_z = 3.0
+        if config:
+            min_z = config.get("screening", {}).get("min_altman_z", min_z)
         altman_z = _safe_float(deep_fund.get("altman_z_score"))
-        if np.isnan(altman_z) or altman_z <= 1.81:
+        if np.isnan(altman_z) or altman_z <= min_z:
             return False
 
         quarters = deep_fund.get("quarters_available", 0)

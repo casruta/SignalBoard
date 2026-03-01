@@ -108,6 +108,7 @@
                 html += renderStockRow(stocks[i], i);
                 html += '<hr class="rule">';
             }
+
             // Pick generation date
             if (stocks.length > 0 && stocks[0].generated_at) {
                 var d = new Date(stocks[0].generated_at);
@@ -144,6 +145,11 @@
             html += miniBar("Blindspot", s.blindspot_score);
             html += miniBar("Margins", s.margin_score);
             html += miniBar("ROIC Spread", s.roic_spread_score);
+            if (s.stock_category === 'dividend' && s.analysis && s.analysis.dividend_yield != null) {
+                html += '<div class="mini-bar"><span class="div-yield-indicator">DIV YIELD ' + (s.analysis.dividend_yield * 100).toFixed(1) + '%</span></div>';
+            } else if (s.stock_category === 'dividend' && s.dividend_yield != null) {
+                html += '<div class="mini-bar"><span class="div-yield-indicator">DIV YIELD ' + (s.dividend_yield * 100).toFixed(1) + '%</span></div>';
+            }
             html += '</div>';
 
             html += '<span class="industry">' + escapeHtml(s.sector || "") + '</span>';
@@ -260,9 +266,13 @@
                 { id: "capital", title: "Capital Structure", html: renderCapitalStructure(data.capital_structure) },
                 { id: "cashflow", title: "Cash Flow Statement", html: renderCashFlow(data.cash_flow) },
                 { id: "dcf", title: "DCF Valuation", html: renderDCF(data.dcf) },
+                { id: "ddm", title: "DDM Valuation", html: renderDDM(data.ddm) },
                 { id: "comps", title: "Comparable Companies", html: renderComps(data.comps) },
                 { id: "impliedval", title: "Implied Valuation from Comps", html: renderImpliedValuation(data.comps) },
                 { id: "profitability", title: "Profitability & Efficiency", html: renderProfitability(data.profitability) },
+                { id: "ceoinfo", title: "CEO & Leadership", html: renderCEOInfo(data.ceo_info) },
+                { id: "compensation", title: "Compensation Structure", html: renderCompensation(data.compensation) },
+                { id: "roi", title: "ROI Analysis", html: renderROI(data.roi) },
                 { id: "catalysts", title: "Catalysts & Events", html: renderCatalysts(data.catalysts) },
                 { id: "moat", title: "Competitive Moat", html: renderMoat(data.moat) },
                 { id: "risks", title: "Risk Factors", html: renderRisks(data.risks) },
@@ -574,6 +584,138 @@
                 html += '</div>';
             }
 
+            return html;
+        }
+
+        function renderDDM(ddm) {
+            if (!ddm) return '';
+            var html = '<div class="report-card">';
+            html += '<div class="card-accent"></div>';
+
+            // Assumptions table
+            html += '<table class="data-tbl"><tbody>';
+            html += '<tr class="sub-header"><td colspan="2">DDM ASSUMPTIONS</td></tr>';
+            html += '<tr><td>Current Dividend (D0)</td><td>' + fmtUSD(ddm.assumptions.current_dividend) + '</td></tr>';
+            html += '<tr><td>Next Year Dividend (D1)</td><td>' + fmtUSD(ddm.assumptions.next_year_dividend) + '</td></tr>';
+            html += '<tr><td>Sustainable Growth Rate</td><td>' + fmtPctReport(ddm.assumptions.sustainable_growth) + '</td></tr>';
+            html += '<tr><td>Growth Rate Used</td><td>' + fmtPctReport(ddm.assumptions.growth_rate_used) + '</td></tr>';
+            html += '<tr><td>Required Return (CAPM)</td><td>' + fmtPctReport(ddm.assumptions.required_return) + '</td></tr>';
+            html += '</tbody></table>';
+
+            // Output
+            html += '<table class="data-tbl"><tbody>';
+            html += '<tr class="sub-header"><td colspan="2">DDM OUTPUT</td></tr>';
+            html += '<tr><td>Intrinsic Value</td><td>' + fmtUSD(ddm.output.intrinsic_value) + '</td></tr>';
+            html += '<tr><td>Current Price</td><td>' + fmtUSD(ddm.output.current_price) + '</td></tr>';
+            html += '<tr><td>Upside</td><td>' + fmtPctReport(ddm.output.upside) + '</td></tr>';
+            html += '<tr><td>Margin of Safety</td><td>' + fmtPctReport(ddm.output.margin_of_safety) + '</td></tr>';
+            html += '</tbody></table>';
+
+            // Sensitivity matrix
+            if (ddm.sensitivity && ddm.sensitivity.rows) {
+                html += '<table class="data-tbl">';
+                html += '<thead><tr><th>' + ddm.sensitivity.row_label + ' \\ ' + ddm.sensitivity.col_label + '</th>';
+                ddm.sensitivity.g_values.forEach(function(g) {
+                    html += '<th>' + fmtPctReport(g) + '</th>';
+                });
+                html += '</tr></thead><tbody>';
+                ddm.sensitivity.rows.forEach(function(row) {
+                    html += '<tr><td>' + fmtPctReport(row.r) + '</td>';
+                    row.values.forEach(function(v) {
+                        html += '<td>' + (v != null ? fmtUSD(v) : '\u2014') + '</td>';
+                    });
+                    html += '</tr>';
+                });
+                html += '</tbody></table>';
+            }
+
+            html += '</div>';
+            return html;
+        }
+
+        function renderCEOInfo(ceoInfo) {
+            if (!ceoInfo) return '';
+            var html = '<div class="report-card">';
+            html += '<div class="card-accent"></div>';
+            html += '<table class="data-tbl"><tbody>';
+            html += '<tr class="sub-header"><td colspan="2">CEO STATUS</td></tr>';
+
+            if (ceoInfo.has_data) {
+                var status = ceoInfo.ceo_changed_recently ? 'CHANGED' : 'STABLE';
+                var statusClass = ceoInfo.ceo_changed_recently ? 'color: #8b5e3c' : 'color: #1a1a1a';
+                html += '<tr><td>Leadership Status</td><td style="' + statusClass + '">' + status + '</td></tr>';
+                if (ceoInfo.change_date) {
+                    html += '<tr><td>Change Date</td><td>' + ceoInfo.change_date + '</td></tr>';
+                }
+                if (ceoInfo.filing_url) {
+                    html += '<tr><td>SEC Filing</td><td><a href="' + ceoInfo.filing_url + '" target="_blank" style="color: #666; text-decoration: underline">View 8-K</a></td></tr>';
+                }
+            } else {
+                html += '<tr><td colspan="2" style="color: #999">CEO data unavailable</td></tr>';
+            }
+
+            html += '</tbody></table>';
+            if (ceoInfo.note) {
+                html += '<p style="font-size: 0.78rem; color: #666; margin-top: 8px; font-style: italic">' + ceoInfo.note + '</p>';
+            }
+            html += '</div>';
+            return html;
+        }
+
+        function renderCompensation(comp) {
+            if (!comp || !comp.has_data) {
+                return '<div class="report-card"><div class="card-accent"></div><p style="color: #999; font-size: 0.78rem">Executive compensation data unavailable</p></div>';
+            }
+            var html = '<div class="report-card">';
+            html += '<div class="card-accent"></div>';
+            html += '<table class="data-tbl"><tbody>';
+            html += '<tr class="sub-header"><td colspan="2">EXECUTIVE COMPENSATION</td></tr>';
+
+            if (comp.equity_pct != null) {
+                html += '<tr><td>Equity-Based (%)</td><td>' + fmtPctReport(comp.equity_pct) + '</td></tr>';
+            }
+            if (comp.cash_pct != null) {
+                html += '<tr><td>Cash-Based (%)</td><td>' + fmtPctReport(comp.cash_pct) + '</td></tr>';
+            }
+            if (comp.total_ceo_compensation) {
+                html += '<tr><td>Total CEO Compensation</td><td>' + fmtUSD(comp.total_ceo_compensation) + '</td></tr>';
+            }
+
+            var alignment = comp.equity_heavy ? 'Equity-heavy \u2014 aligned with shareholders' : 'Cash-heavy \u2014 review alignment';
+            html += '<tr><td>Incentive Alignment</td><td>' + alignment + '</td></tr>';
+
+            if (comp.latest_proxy_date) {
+                html += '<tr><td>Latest Proxy Date</td><td>' + comp.latest_proxy_date + '</td></tr>';
+            }
+            if (comp.filing_url) {
+                html += '<tr><td>SEC Filing</td><td><a href="' + comp.filing_url + '" target="_blank" style="color: #666; text-decoration: underline">View DEF 14A</a></td></tr>';
+            }
+
+            html += '</tbody></table>';
+            if (comp.alignment_note) {
+                html += '<p style="font-size: 0.78rem; color: #666; margin-top: 8px; font-style: italic">' + comp.alignment_note + '</p>';
+            }
+            html += '</div>';
+            return html;
+        }
+
+        function renderROI(roi) {
+            if (!roi || roi.total_roi_pct == null) return '';
+            var html = '<div class="report-card">';
+            html += '<div class="card-accent"></div>';
+            html += '<table class="data-tbl"><tbody>';
+            html += '<tr class="sub-header"><td colspan="2">RETURN ON INVESTMENT</td></tr>';
+            html += '<tr><td>Total Projected ROI</td><td style="font-weight: 500">' + fmtPctReport(roi.total_roi_pct) + '</td></tr>';
+            html += '<tr><td>Capital Gain</td><td>' + fmtPctReport(roi.capital_gain_pct) + '</td></tr>';
+            html += '<tr><td>Income Return (Dividends)</td><td>' + fmtPctReport(roi.income_return_pct) + '</td></tr>';
+            html += '<tr><td>Risk-Adjusted ROI (\u00F7 Beta)</td><td>' + fmtPctReport(roi.risk_adjusted_roi) + '</td></tr>';
+            if (roi.target_price) {
+                html += '<tr><td>Target Price</td><td>' + fmtUSD(roi.target_price) + '</td></tr>';
+            }
+            if (roi.current_price) {
+                html += '<tr><td>Current Price</td><td>' + fmtUSD(roi.current_price) + '</td></tr>';
+            }
+            html += '</tbody></table></div>';
             return html;
         }
 
@@ -898,7 +1040,12 @@
 
             // Header with composite score
             html += '<div class="detail-header">';
-            html += '<div class="ticker">' + escapeHtml(s.ticker) + '</div>';
+            html += '<div class="ticker">' + escapeHtml(s.ticker);
+            if (s.stock_category) {
+                var catLabel = s.stock_category === 'growth' ? 'GROWTH' : s.stock_category === 'dividend' ? 'DIVIDEND' : s.stock_category.toUpperCase();
+                html += '<span style="font-size:0.6rem;letter-spacing:0.08em;color:#999;background:rgba(26,26,26,0.04);padding:2px 8px;margin-left:10px;vertical-align:middle">' + catLabel + '</span>';
+            }
+            html += '</div>';
             html += '<span class="name">' + escapeHtml(s.short_name || "") + '</span>';
             if (s.market_cap) {
                 html += '<span class="market-cap-label">' + formatMarketCap(s.market_cap) + '</span>';
@@ -924,6 +1071,9 @@
                 }
                 html += '</ul></div>';
             }
+
+            // Forward Outlook
+            html += renderForwardOutlook(analysis);
 
             // Component Score Breakdown
             html += '<div class="explanation-section section-scores">';
@@ -982,7 +1132,181 @@
                 html += '</div></div>';
             }
 
+            // DDM Valuation (dividend stocks)
+            if (analysis.ddm) {
+                html += '<div class="explanation-section section-ddm">';
+                html += '<div class="section-title">DDM Valuation</div>';
+                html += '<div class="metric-grid">';
+                if (analysis.ddm.output) {
+                    if (analysis.ddm.output.intrinsic_value != null)
+                        html += metricRow("Intrinsic Value (DDM)", "$" + analysis.ddm.output.intrinsic_value.toFixed(2));
+                    if (analysis.ddm.output.upside != null)
+                        html += metricRow("DDM Upside", (analysis.ddm.output.upside > 0 ? "+" : "") + (analysis.ddm.output.upside * 100).toFixed(1) + "%");
+                    if (analysis.ddm.output.margin_of_safety != null)
+                        html += metricRow("Margin of Safety", (analysis.ddm.output.margin_of_safety * 100).toFixed(1) + "%");
+                }
+                if (analysis.ddm.assumptions) {
+                    if (analysis.ddm.assumptions.growth_rate_used != null)
+                        html += metricRow("Growth Rate", (analysis.ddm.assumptions.growth_rate_used * 100).toFixed(1) + "%");
+                    if (analysis.ddm.assumptions.required_return != null)
+                        html += metricRow("Required Return", (analysis.ddm.assumptions.required_return * 100).toFixed(1) + "%");
+                }
+                html += '</div></div>';
+            }
+
+            // CEO Info
+            if (analysis.ceo_info) {
+                html += '<div class="explanation-section section-ceo">';
+                html += '<div class="section-title">CEO & Leadership</div>';
+                html += '<div class="metric-grid">';
+                if (analysis.ceo_info.has_data) {
+                    var ceoStatus = analysis.ceo_info.ceo_changed_recently ? 'Changed' : 'Stable';
+                    html += metricRow("Leadership Status", ceoStatus);
+                    if (analysis.ceo_info.change_date)
+                        html += metricRow("Change Date", analysis.ceo_info.change_date);
+                } else {
+                    html += metricRow("Status", "Data unavailable");
+                }
+                html += '</div>';
+                if (analysis.ceo_info.note) {
+                    html += '<p style="font-size:0.78rem;color:#666;margin-top:8px;font-style:italic">' + escapeHtml(analysis.ceo_info.note) + '</p>';
+                }
+                html += '</div>';
+            }
+
+            // Compensation
+            if (analysis.compensation) {
+                html += '<div class="explanation-section section-comp">';
+                html += '<div class="section-title">Compensation Structure</div>';
+                html += '<div class="metric-grid">';
+                if (analysis.compensation.has_data) {
+                    if (analysis.compensation.equity_pct != null)
+                        html += metricRow("Equity-Based", (analysis.compensation.equity_pct * 100).toFixed(1) + "%");
+                    if (analysis.compensation.cash_pct != null)
+                        html += metricRow("Cash-Based", (analysis.compensation.cash_pct * 100).toFixed(1) + "%");
+                    if (analysis.compensation.total_ceo_compensation)
+                        html += metricRow("Total CEO Comp", "$" + Number(analysis.compensation.total_ceo_compensation).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}));
+                    var alignLabel = analysis.compensation.equity_heavy ? 'Equity-heavy' : 'Cash-heavy';
+                    html += metricRow("Alignment", alignLabel);
+                } else {
+                    html += metricRow("Status", "Data unavailable");
+                }
+                html += '</div>';
+                if (analysis.compensation.alignment_note) {
+                    html += '<p style="font-size:0.78rem;color:#666;margin-top:8px;font-style:italic">' + escapeHtml(analysis.compensation.alignment_note) + '</p>';
+                }
+                html += '</div>';
+            }
+
+            // ROI Analysis
+            if (analysis.roi && analysis.roi.total_roi_pct != null) {
+                html += '<div class="explanation-section section-roi">';
+                html += '<div class="section-title">ROI Analysis</div>';
+                html += '<div class="metric-grid">';
+                html += metricRow("Total Projected ROI", (analysis.roi.total_roi_pct * 100).toFixed(1) + "%");
+                if (analysis.roi.capital_gain_pct != null)
+                    html += metricRow("Capital Gain", (analysis.roi.capital_gain_pct * 100).toFixed(1) + "%");
+                if (analysis.roi.income_return_pct != null)
+                    html += metricRow("Income Return", (analysis.roi.income_return_pct * 100).toFixed(1) + "%");
+                if (analysis.roi.risk_adjusted_roi != null)
+                    html += metricRow("Risk-Adjusted ROI", (analysis.roi.risk_adjusted_roi * 100).toFixed(1) + "%");
+                if (analysis.roi.target_price != null)
+                    html += metricRow("Target Price", "$" + analysis.roi.target_price.toFixed(2));
+                if (analysis.roi.current_price != null)
+                    html += metricRow("Current Price", "$" + analysis.roi.current_price.toFixed(2));
+                html += '</div></div>';
+            }
+
             contentEl.innerHTML = html;
+        }
+
+        // ── Forward Outlook renderer ─────────────────────────
+
+        function renderForwardOutlook(a) {
+            var outlook = a.forward_outlook;
+            var hasTrends = a.roe_4q_trend != null || a.roic_4q_trend != null ||
+                            a.gross_margin_trend != null || a.operating_margin_trend != null ||
+                            a.net_margin_4q_trend != null || a.ocf_margin_4q_trend != null;
+            var hasForwardSignals = a.implied_growth_rate != null || a.fcf_growth_3yr_cagr != null ||
+                                   a.earnings_persistence != null || a.continuous_piotroski != null;
+
+            if (!outlook && !hasTrends && !hasForwardSignals) return "";
+
+            var html = '<div class="explanation-section section-outlook">';
+            html += '<div class="section-title">Forward Outlook</div>';
+
+            // Direction header
+            if (outlook) {
+                var dir = outlook.direction || "stable";
+                var dirLabel = dir.toUpperCase();
+                var dirClass = "outlook-dir-" + dir;
+                var arrow = dir === "improving" ? "\u2197" : dir === "deteriorating" ? "\u2198" : "\u2192";
+                html += '<div class="outlook-header">';
+                html += '<div class="outlook-direction ' + dirClass + '">';
+                html += '<span class="outlook-arrow">' + arrow + '</span> ';
+                html += dirLabel;
+                html += '</div>';
+                html += '<span class="outlook-agreement">' + outlook.trend_agreement + ' of ' + outlook.trend_count + ' trends agree</span>';
+                html += '</div>';
+            }
+
+            // Trend grid
+            if (hasTrends) {
+                html += '<div class="outlook-trends">';
+                html += '<div class="outlook-subheading">Trajectory (4-Quarter Trend Slopes)</div>';
+                html += trendRow("ROE", a.roe_4q_trend);
+                html += trendRow("ROIC", a.roic_4q_trend);
+                html += trendRow("Gross Margin", a.gross_margin_trend);
+                html += trendRow("Operating Margin", a.operating_margin_trend);
+                html += trendRow("Net Margin", a.net_margin_4q_trend);
+                html += trendRow("OCF Margin", a.ocf_margin_4q_trend);
+                html += '</div>';
+            }
+
+            // Forward signals
+            if (hasForwardSignals) {
+                html += '<div class="outlook-signals">';
+                html += '<div class="outlook-subheading">Forward Signals</div>';
+                html += '<div class="metric-grid">';
+                if (a.implied_growth_rate != null)
+                    html += metricRow("Implied Growth Rate", (a.implied_growth_rate * 100).toFixed(1) + "%");
+                if (a.fcf_growth_3yr_cagr != null)
+                    html += metricRow("FCF 3yr CAGR", (a.fcf_growth_3yr_cagr * 100).toFixed(1) + "%");
+                if (a.continuous_piotroski != null)
+                    html += metricRow("Piotroski (Continuous)", Math.round(a.continuous_piotroski) + " / 100");
+                if (a.earnings_persistence != null)
+                    html += metricRow("Earnings Persistence", a.earnings_persistence.toFixed(2));
+                if (a.revenue_acceleration != null)
+                    html += metricRow("Revenue Acceleration", (a.revenue_acceleration > 0 ? "+" : "") + (a.revenue_acceleration * 100).toFixed(1) + " pp");
+                if (a.blindspot_score != null)
+                    html += metricRow("Blindspot Score", a.blindspot_score.toFixed(2));
+                html += '</div></div>';
+            }
+
+            // Insider conviction
+            if (a.insider_cluster_buy) {
+                html += '<div class="outlook-insider">';
+                html += '<span class="outlook-insider-label">Insider Conviction</span> ';
+                html += 'Cluster buying detected \u2014 management is buying their own stock';
+                html += '</div>';
+            }
+
+            html += '</div>';
+            return html;
+        }
+
+        function trendRow(label, value) {
+            if (value == null) return "";
+            var arrow, cls;
+            if (value > 0.01) { arrow = "\u25B2"; cls = "trend-up"; }
+            else if (value < -0.01) { arrow = "\u25BC"; cls = "trend-down"; }
+            else { arrow = "\u25C6"; cls = "trend-flat"; }
+            var display = (value > 0 ? "+" : "") + (value * 100).toFixed(2) + "%";
+            return '<div class="trend-row">' +
+                '<span class="trend-label">' + label + '</span>' +
+                '<span class="trend-indicator ' + cls + '">' + arrow + '</span>' +
+                '<span class="trend-value">' + display + '</span>' +
+                '</div>';
         }
 
         // ── Score card helpers ─────────────────────────────────

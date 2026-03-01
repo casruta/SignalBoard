@@ -18,7 +18,7 @@ def _make_deep_fundamentals(n_stocks: int = 10) -> dict[str, dict]:
     for t in tickers:
         result[t] = {
             "piotroski_f_score": rng.integers(3, 9),
-            "altman_z_score": rng.uniform(2.0, 6.0),
+            "altman_z_score": rng.uniform(3.5, 6.0),
             "interest_coverage": rng.uniform(5, 20),
             "accruals_ratio": rng.uniform(-0.10, 0.05),
             "fcf_to_net_income": rng.uniform(0.8, 1.5),
@@ -183,6 +183,27 @@ class TestSafetyFilter:
         info = {"marketCap": 5e9}
         deep_fund = {"altman_z_score": 1.5, "quarters_available": 4}
         assert screener._apply_safety_filters(info, deep_fund) is False
+
+    def test_blocks_grey_zone_altman_z(self):
+        screener = DynamicScreener()
+        info = {"marketCap": 5e9}
+        deep_fund = {"altman_z_score": 2.5, "quarters_available": 4}
+        assert screener._apply_safety_filters(info, deep_fund) is False
+
+    def test_blocks_altman_z_at_boundary(self):
+        screener = DynamicScreener()
+        info = {"marketCap": 5e9}
+        deep_fund_at = {"altman_z_score": 3.0, "quarters_available": 4}
+        deep_fund_above = {"altman_z_score": 3.01, "quarters_available": 4}
+        assert screener._apply_safety_filters(info, deep_fund_at) is False
+        assert screener._apply_safety_filters(info, deep_fund_above) is True
+
+    def test_altman_z_threshold_from_config(self):
+        screener = DynamicScreener()
+        info = {"marketCap": 5e9}
+        deep_fund = {"altman_z_score": 2.0, "quarters_available": 4}
+        config = {"screening": {"min_altman_z": 1.81}}
+        assert screener._apply_safety_filters(info, deep_fund, config=config) is True
 
     def test_blocks_insufficient_quarters(self):
         screener = DynamicScreener()

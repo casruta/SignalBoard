@@ -20,7 +20,7 @@ screening:
   top_n: 50                      # Number of stocks to keep after dynamic screening
   min_market_cap: 300000000      # $300M minimum
   max_market_cap: 20000000000    # $20B maximum
-  min_altman_z: 1.81             # Not in distress zone
+  min_altman_z: 3.0              # Safe zone only (excludes grey zone)
 
 strategy:
   max_positions: 20
