@@ -266,14 +266,13 @@ def _run_screener(
         except Exception:
             pass
 
-    # Run screener
+    # Run screener — DCF-only ranking with safety gates
     screener_cfg = config.get("screening", {})
     top_n = screener_cfg.get("top_n", 20)
     screener = DynamicScreener(top_n=top_n)
 
-    macro_regime = "neutral"
-    scored_df = screener.compute_composite_scores(
-        deep_fund_map, dcf_map, info_map, macro_regime, config=config
+    scored_df = screener.compute_dcf_rankings(
+        deep_fund_map, dcf_map, info_map, config=config
     )
     if scored_df.empty:
         return []
@@ -282,7 +281,7 @@ def _run_screener(
     if safe.empty:
         safe = scored_df.head(top_n)  # Fallback: show top even if safety filters fail
 
-    safe = safe.sort_values("composite_score", ascending=False).head(top_n)
+    safe = safe.sort_values("dcf_upside_pct", ascending=False, na_position="last").head(top_n)
 
     # Build result list with analysis payloads
     results = []
@@ -300,15 +299,13 @@ def _run_screener(
             "sector": info.get("sector", ""),
             "industry": info.get("industry", ""),
             "market_cap": info.get("marketCap"),
-            "composite_score": float(row["composite_score"]),
+            "dcf_upside_pct": float(row["dcf_upside_pct"]) if not np.isnan(row["dcf_upside_pct"]) else None,
+            "margin_of_safety": float(row["margin_of_safety"]) if not np.isnan(row["margin_of_safety"]) else None,
+            "intrinsic_value": float(row["intrinsic_value"]) if not np.isnan(row["intrinsic_value"]) else None,
+            "current_price": float(row["current_price"]) if not np.isnan(row["current_price"]) else None,
+            "wacc": float(row["wacc"]) if not np.isnan(row["wacc"]) else None,
+            "fcf_yield": float(row["fcf_yield"]) if not np.isnan(row["fcf_yield"]) else None,
             "rank": int(row["rank"]),
-            "piotroski_score": float(row.get("piotroski_score", 0)),
-            "roic_spread_score": float(row.get("roic_spread_score", 0)),
-            "cash_flow_score": float(row.get("cash_flow_score", 0)),
-            "balance_sheet_score": float(row.get("balance_sheet_score", 0)),
-            "dcf_score": float(row.get("dcf_score", 0)),
-            "blindspot_score": float(row.get("blindspot_score", 0)),
-            "margin_score": float(row.get("margin_score", 0)),
             "analysis": analysis,
         })
 

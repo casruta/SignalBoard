@@ -50,19 +50,16 @@ class ScreenedStockRow(Base):
     sector = Column(String(50))
     industry = Column(String(100))
     market_cap = Column(Float)
-    composite_score = Column(Float)
     rank = Column(Integer)
-    # Component scores (0-1 each)
-    piotroski_score = Column(Float)
-    roic_spread_score = Column(Float)
-    cash_flow_score = Column(Float)
-    balance_sheet_score = Column(Float)
-    dcf_score = Column(Float)
-    blindspot_score = Column(Float)
-    margin_score = Column(Float)
-    stock_category = Column(String(20))
-    # Key metrics for display
-    payload = Column(Text)  # Full analysis JSON (DCF, deep fundamentals, etc.)
+    # DCF-centric valuation columns
+    dcf_upside_pct = Column(Float)
+    margin_of_safety = Column(Float)
+    intrinsic_value = Column(Float)
+    current_price = Column(Float)
+    wacc = Column(Float)
+    fcf_yield = Column(Float)
+    # Full analysis JSON (DCF, deep fundamentals, etc.)
+    payload = Column(Text)
     generated_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
@@ -178,16 +175,13 @@ class Database:
                     sector=s.get("sector", ""),
                     industry=s.get("industry", ""),
                     market_cap=s.get("market_cap"),
-                    composite_score=s.get("composite_score"),
                     rank=s.get("rank"),
-                    piotroski_score=s.get("piotroski_score"),
-                    roic_spread_score=s.get("roic_spread_score"),
-                    cash_flow_score=s.get("cash_flow_score"),
-                    balance_sheet_score=s.get("balance_sheet_score"),
-                    dcf_score=s.get("dcf_score"),
-                    blindspot_score=s.get("blindspot_score"),
-                    margin_score=s.get("margin_score"),
-                    stock_category=s.get("stock_category", ""),
+                    dcf_upside_pct=s.get("dcf_upside_pct"),
+                    margin_of_safety=s.get("margin_of_safety"),
+                    intrinsic_value=s.get("intrinsic_value"),
+                    current_price=s.get("current_price"),
+                    wacc=s.get("wacc"),
+                    fcf_yield=s.get("fcf_yield"),
                     payload=json.dumps(s.get("analysis", {})),
                     generated_at=datetime.utcnow(),
                 )
@@ -195,11 +189,11 @@ class Database:
             session.commit()
 
     def get_screened_stocks(self, limit: int = 20) -> list[dict]:
-        """Get the current screened stocks, ranked by composite score."""
+        """Get the current screened stocks, ranked by DCF upside."""
         with self._session() as session:
             rows = (
                 session.query(ScreenedStockRow)
-                .order_by(ScreenedStockRow.composite_score.desc())
+                .order_by(ScreenedStockRow.dcf_upside_pct.desc())
                 .limit(limit)
                 .all()
             )
@@ -210,16 +204,13 @@ class Database:
                     "sector": r.sector,
                     "industry": r.industry,
                     "market_cap": r.market_cap,
-                    "composite_score": r.composite_score,
+                    "dcf_upside_pct": r.dcf_upside_pct,
+                    "margin_of_safety": r.margin_of_safety,
+                    "intrinsic_value": r.intrinsic_value,
+                    "current_price": r.current_price,
+                    "wacc": r.wacc,
+                    "fcf_yield": r.fcf_yield,
                     "rank": r.rank,
-                    "piotroski_score": r.piotroski_score,
-                    "roic_spread_score": r.roic_spread_score,
-                    "cash_flow_score": r.cash_flow_score,
-                    "balance_sheet_score": r.balance_sheet_score,
-                    "dcf_score": r.dcf_score,
-                    "blindspot_score": r.blindspot_score,
-                    "margin_score": r.margin_score,
-                    "stock_category": r.stock_category,
                     "generated_at": r.generated_at.isoformat() if r.generated_at else None,
                 }
                 for r in rows
@@ -242,16 +233,13 @@ class Database:
                 "sector": row.sector,
                 "industry": row.industry,
                 "market_cap": row.market_cap,
-                "composite_score": row.composite_score,
+                "dcf_upside_pct": row.dcf_upside_pct,
+                "margin_of_safety": row.margin_of_safety,
+                "intrinsic_value": row.intrinsic_value,
+                "current_price": row.current_price,
+                "wacc": row.wacc,
+                "fcf_yield": row.fcf_yield,
                 "rank": row.rank,
-                "piotroski_score": row.piotroski_score,
-                "roic_spread_score": row.roic_spread_score,
-                "cash_flow_score": row.cash_flow_score,
-                "balance_sheet_score": row.balance_sheet_score,
-                "dcf_score": row.dcf_score,
-                "blindspot_score": row.blindspot_score,
-                "margin_score": row.margin_score,
-                "stock_category": row.stock_category,
                 "generated_at": row.generated_at.isoformat() if row.generated_at else None,
             }
             if row.payload:

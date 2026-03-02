@@ -12,50 +12,6 @@
 
     function initListPage() {
         var container = document.getElementById("ticker-container");
-        // Wire nav buttons to overlays
-        document.querySelectorAll(".nav-btn").forEach(function (btn) {
-            btn.addEventListener("click", function () {
-                var id = btn.getAttribute("data-overlay");
-                var overlay = document.getElementById(id);
-                if (overlay) overlay.classList.add("open");
-            });
-        });
-
-        document.querySelectorAll(".overlay").forEach(function (overlay) {
-            var closeBtn = overlay.querySelector(".overlay-close");
-            if (closeBtn) {
-                closeBtn.addEventListener("click", function () {
-                    overlay.classList.remove("open");
-                });
-            }
-            overlay.addEventListener("click", function (e) {
-                if (e.target === overlay) overlay.classList.remove("open");
-            });
-        });
-
-        // Animate methodology overlay components on open
-        document.querySelectorAll(".nav-btn").forEach(function (btn) {
-            btn.addEventListener("click", function () {
-                var id = btn.getAttribute("data-overlay");
-                if (id === "methodology-overlay") {
-                    setTimeout(function () {
-                        // Animate scoring dimension bars
-                        document.querySelectorAll(".dim-fill").forEach(function (fill) {
-                            var w = fill.getAttribute("data-width");
-                            if (w) fill.style.width = w + "%";
-                        });
-                        // Stagger funnel rows
-                        document.querySelectorAll(".funnel-row").forEach(function (row, i) {
-                            setTimeout(function () {
-                                row.style.transition = "opacity 0.4s ease, transform 0.4s ease";
-                                row.style.opacity = "1";
-                                row.style.transform = "translateY(0)";
-                            }, i * 100);
-                        });
-                    }, 150);
-                }
-            });
-        });
 
         fetchScreenedStocks();
 
@@ -67,7 +23,6 @@
                 if (stocks.length > 0) {
                     renderStocks(stocks);
                 } else {
-                    // Fallback to signals if no screened stocks yet
                     fetchSignals();
                 }
             } catch (err) {
@@ -120,53 +75,50 @@
         }
 
         function renderStockRow(s, index) {
-            var score = s.composite_score != null ? Math.round(s.composite_score * 100) : "—";
+            var upside = s.dcf_upside_pct != null ? (s.dcf_upside_pct * 100).toFixed(0) : "\u2014";
+            var mos = s.margin_of_safety != null ? (s.margin_of_safety * 100).toFixed(0) : "\u2014";
+            var iv = s.intrinsic_value != null ? "$" + Number(s.intrinsic_value).toFixed(2) : "\u2014";
+            var price = s.current_price != null ? "$" + Number(s.current_price).toFixed(2) : "\u2014";
+            var fcfYield = s.fcf_yield != null ? (s.fcf_yield * 100).toFixed(1) + "%" : "\u2014";
             var rank = s.rank || (index + 1);
 
             var html = '<a class="ticker-row" href="/detail.html?ticker=' + encodeURIComponent(s.ticker) + '&source=screened">';
+
+            // Primary line: rank + ticker + name + DCF upside
             html += '<div class="row-main">';
             html += '<span class="rank">#' + rank + '</span>';
             html += '<div class="row-info">';
             html += '<span class="symbol">' + escapeHtml(s.ticker) + '</span>';
             html += '<span class="name-label">' + escapeHtml(s.short_name || "") + '</span>';
+            html += '</div>';
+            var upsideSign = s.dcf_upside_pct != null && s.dcf_upside_pct >= 0 ? "+" : "";
+            html += '<span class="dcf-upside">' + upsideSign + upside + '%</span>';
+            html += '</div>';
+
+            // Margin of safety gauge (thin bar)
+            var mosPct = s.margin_of_safety != null ? Math.min(Math.round(s.margin_of_safety * 100), 100) : 0;
+            html += '<div class="mos-gauge">';
+            html += '<div class="mos-fill" style="width:' + mosPct + '%"></div>';
+            html += '</div>';
+
+            // Metrics line
+            html += '<div class="row-metrics">';
+            html += '<span class="metric">IV ' + iv + '</span>';
+            html += '<span class="metric">Price ' + price + '</span>';
+            html += '<span class="metric">MoS ' + mos + '%</span>';
+            html += '<span class="metric">FCF Yld ' + fcfYield + '</span>';
+            html += '</div>';
+
+            // Context line: sector + market cap
+            html += '<div class="row-context">';
+            html += '<span class="context-label">' + escapeHtml(s.sector || "") + '</span>';
             if (s.market_cap) {
-                html += '<span class="market-cap-label">' + formatMarketCap(s.market_cap) + '</span>';
-            }
-            html += '</div>';
-            html += '<span class="score">' + score + '</span>';
-            html += '</div>';
-
-            // Mini score bars
-            html += '<div class="score-bars">';
-            html += miniBar("Piotroski", s.piotroski_score);
-            html += miniBar("Cash Flow", s.cash_flow_score);
-            html += miniBar("ROIC Spread", s.roic_spread_score);
-            html += miniBar("Balance Sheet", s.balance_sheet_score);
-            html += miniBar("DCF", s.dcf_score);
-            html += miniBar("Income Health", s.income_health_score);
-            html += miniBar("Growth", s.growth_score);
-            html += miniBar("Margins", s.margin_score);
-            html += miniBar("Blindspot", s.blindspot_score);
-            if (s.stock_category === 'dividend' && s.analysis && s.analysis.dividend_yield != null) {
-                html += '<div class="mini-bar"><span class="div-yield-indicator">DIV YIELD ' + (s.analysis.dividend_yield * 100).toFixed(1) + '%</span></div>';
-            } else if (s.stock_category === 'dividend' && s.dividend_yield != null) {
-                html += '<div class="mini-bar"><span class="div-yield-indicator">DIV YIELD ' + (s.dividend_yield * 100).toFixed(1) + '%</span></div>';
+                html += '<span class="context-label">' + formatMarketCap(s.market_cap) + '</span>';
             }
             html += '</div>';
 
-            html += '<span class="industry">' + escapeHtml(s.sector || "") + '</span>';
             html += '</a>';
             return html;
-        }
-
-        function miniBar(label, value) {
-            var pct = value != null ? Math.round(value * 100) : 0;
-            return (
-                '<div class="mini-bar">' +
-                '<span class="mini-label">' + label + '</span>' +
-                '<div class="mini-track"><div class="mini-fill" style="width:' + pct + '%"></div></div>' +
-                '</div>'
-            );
         }
 
         function renderLegacyTickers(signals) {
@@ -188,7 +140,7 @@
                 html += '<span class="symbol">' + escapeHtml(signals[i].ticker) + '</span>';
                 html += '</div>';
                 html += '</div>';
-                html += '<span class="industry">' + escapeHtml(signals[i].sector || "") + '</span>';
+                html += '<span class="context-label">' + escapeHtml(signals[i].sector || "") + '</span>';
                 html += '</a><hr class="rule">';
             }
             container.innerHTML = html;
@@ -244,24 +196,10 @@
                     panel.classList.toggle('open');
                     header.classList.toggle('summary-active');
                 });
-                // Calculation detail expand/collapse on scoring row click
-                contentEl.addEventListener('click', function(e) {
-                    var row = e.target.closest('.calc-expandable');
-                    if (!row) return;
-                    var calcId = row.getAttribute('data-calc-id');
-                    var detail = document.getElementById(calcId);
-                    if (!detail) return;
-                    var isOpen = detail.style.display !== 'none';
-                    detail.style.display = isOpen ? 'none' : '';
-                    var toggle = row.querySelector('.calc-toggle');
-                    if (toggle) toggle.innerHTML = isOpen ? '&#9662;' : '&#9652;';
-                    row.classList.toggle('calc-open', !isOpen);
-                });
                 var tocEl = document.getElementById("report-toc");
                 if (tocEl) renderTOC(tocEl);
             } catch (err) {
                 console.error("Report render failed:", err);
-                // Fallback: try screened detail, then legacy
                 if (source === "screened") {
                     fetchScreenedDetail(ticker);
                 } else {
@@ -275,24 +213,14 @@
         function renderReport(data) {
             var sections = [
                 { id: "thesis", title: "Investment Thesis", html: renderThesis(data.thesis) },
+                { id: "dcf", title: "DCF Valuation", html: renderDCF(data.dcf) },
                 { id: "snapshot", title: "Market Snapshot", html: renderSnapshot(data.snapshot) },
+                { id: "cashflow", title: "Cash Flow Statement", html: renderCashFlow(data.cash_flow) },
                 { id: "income", title: "Income Statement", html: renderIncomeStatement(data.income_statement) },
                 { id: "balance", title: "Balance Sheet", html: renderBalanceSheet(data.balance_sheet) },
                 { id: "capital", title: "Capital Structure", html: renderCapitalStructure(data.capital_structure) },
-                { id: "cashflow", title: "Cash Flow Statement", html: renderCashFlow(data.cash_flow) },
-                { id: "dcf", title: "DCF Valuation", html: renderDCF(data.dcf) },
-                { id: "ddm", title: "DDM Valuation", html: renderDDM(data.ddm) },
-                { id: "comps", title: "Comparable Companies", html: renderComps(data.comps) },
-                { id: "impliedval", title: "Implied Valuation from Comps", html: renderImpliedValuation(data.comps) },
                 { id: "profitability", title: "Profitability & Efficiency", html: renderProfitability(data.profitability) },
-                { id: "ceoinfo", title: "CEO & Leadership", html: renderCEOInfo(data.ceo_info) },
-                { id: "compensation", title: "Compensation Structure", html: renderCompensation(data.compensation) },
-                { id: "roi", title: "ROI Analysis", html: renderROI(data.roi_analysis) },
-                { id: "scoring", title: "Scoring Model Breakdown", html: renderScoringBreakdown(data.scoring_breakdown) },
-                { id: "catalysts", title: "Catalysts & Events", html: renderCatalysts(data.catalysts) },
-                { id: "moat", title: "Competitive Moat", html: renderMoat(data.moat) },
                 { id: "risks", title: "Risk Factors", html: renderRisks(data.risks) },
-                { id: "viewchangers", title: "View Changers", html: renderViewChangers(data.view_changers) },
                 { id: "pricetarget", title: "Price Target Derivation", html: renderPriceTarget(data.price_target) },
                 { id: "verdict", title: "Verdict", html: renderVerdict(data.verdict, data.header) }
             ];
@@ -340,13 +268,10 @@
             var html = '<ul>';
             for (var i = 0; i < sections.length; i++) {
                 var s = sections[i];
-                var num = String(i + 1).padStart(2, '0');
                 html += '<li><a href="#section-' + s.id + '" id="toc-' + s.id + '" data-section="' + s.id + '">' + escapeHtml(s.title) + '</a></li>';
             }
             html += '</ul>';
             tocEl.innerHTML = html;
-
-            // Set up Intersection Observer for active tracking
             setupScrollTracking();
         }
 
@@ -357,17 +282,14 @@
             var observer = new IntersectionObserver(function (entries) {
                 entries.forEach(function (entry) {
                     if (entry.isIntersecting) {
-                        // Remove active from all
                         var links = document.querySelectorAll('.report-toc a');
                         for (var i = 0; i < links.length; i++) {
                             links[i].classList.remove('active');
                         }
-                        // Add active to current
                         var id = entry.target.id.replace('section-', '');
                         var activeLink = document.getElementById('toc-' + id);
                         if (activeLink) {
                             activeLink.classList.add('active');
-                            // Scroll TOC to make active item visible
                             activeLink.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
                         }
                     }
@@ -381,7 +303,6 @@
                 observer.observe(sectionEls[i]);
             }
 
-            // Smooth scroll on TOC click
             var tocLinks = document.querySelectorAll('.report-toc a');
             for (var j = 0; j < tocLinks.length; j++) {
                 tocLinks[j].addEventListener('click', function (e) {
@@ -398,7 +319,6 @@
         function renderReportHeader(h) {
             if (!h) return "";
             var ratingClass = (h.rating || "").toLowerCase().replace(/\s+/g, "-");
-            // Map rating to gauge position (0-100)
             var gaugeMap = {"strong-sell": 10, "sell": 25, "hold": 50, "buy": 75, "strong-buy": 90};
             var gaugePos = gaugeMap[ratingClass] || 50;
             var upsideClass = (h.upside_pct || 0) >= 0 ? "positive" : "negative";
@@ -407,7 +327,7 @@
             html += '<div class="report-header-top">';
             html += '<div class="report-header-info">';
             html += '<h1>' + escapeHtml(h.name || h.ticker) + '</h1>';
-            html += '<div class="header-meta">' + escapeHtml(h.ticker) + ' · ' + escapeHtml(h.sector || '') + ' · ' + escapeHtml(h.exchange || '') + '</div>';
+            html += '<div class="header-meta">' + escapeHtml(h.ticker) + ' \u00b7 ' + escapeHtml(h.sector || '') + ' \u00b7 ' + escapeHtml(h.exchange || '') + '</div>';
             html += '</div>';
             html += '<div class="header-price"><span class="pt-value">' + fmtUSD(h.current_price) + '</span></div>';
             html += '</div>';
@@ -427,7 +347,7 @@
             html += '</div>';
             html += '</div>';
 
-            // Key metrics row: Target | Upside | Date
+            // Key metrics row
             html += '<div class="price-target-row">';
             html += '<div class="pt-item"><span class="pt-label">Target</span><span class="pt-value">' + fmtUSD(h.price_target) + '</span></div>';
             html += '<div class="pt-item"><span class="pt-label">Upside</span><span class="pt-value ' + upsideClass + '">' + fmtPctReport(h.upside_pct) + '</span></div>';
@@ -564,7 +484,6 @@
             if (!dcf) return "";
             var html = "";
 
-            // Key assumptions — compact
             if (dcf.assumptions) {
                 var a = dcf.assumptions;
                 var aRows = [
@@ -578,7 +497,6 @@
                 html += '</div>';
             }
 
-            // DCF Output — the money numbers
             if (dcf.output) {
                 var o = dcf.output;
                 var oRows = [
@@ -593,240 +511,12 @@
                 html += '</div>';
             }
 
-            // Sensitivity matrix — separate heading with clear visual break
             if (dcf.sensitivity) {
                 html += '<div class="sensitivity-wrapper">';
                 html += renderSensitivityMatrix(dcf.sensitivity, dcf.output ? dcf.output.current_price : null);
                 html += '</div>';
             }
 
-            return html;
-        }
-
-        function renderDDM(ddm) {
-            if (!ddm) return '';
-            var html = '<div class="report-card">';
-            html += '<div class="card-accent"></div>';
-
-            // Assumptions table
-            html += '<table class="data-tbl"><tbody>';
-            html += '<tr class="sub-header"><td colspan="2">DDM ASSUMPTIONS</td></tr>';
-            html += '<tr><td>Current Dividend (D0)</td><td>' + fmtUSD(ddm.assumptions.current_dividend) + '</td></tr>';
-            html += '<tr><td>Next Year Dividend (D1)</td><td>' + fmtUSD(ddm.assumptions.next_year_dividend) + '</td></tr>';
-            html += '<tr><td>Sustainable Growth Rate</td><td>' + fmtPctReport(ddm.assumptions.sustainable_growth) + '</td></tr>';
-            html += '<tr><td>Growth Rate Used</td><td>' + fmtPctReport(ddm.assumptions.growth_rate_used) + '</td></tr>';
-            html += '<tr><td>Required Return (CAPM)</td><td>' + fmtPctReport(ddm.assumptions.required_return) + '</td></tr>';
-            html += '</tbody></table>';
-
-            // Output
-            html += '<table class="data-tbl"><tbody>';
-            html += '<tr class="sub-header"><td colspan="2">DDM OUTPUT</td></tr>';
-            html += '<tr><td>Intrinsic Value</td><td>' + fmtUSD(ddm.output.intrinsic_value) + '</td></tr>';
-            html += '<tr><td>Current Price</td><td>' + fmtUSD(ddm.output.current_price) + '</td></tr>';
-            html += '<tr><td>Upside</td><td>' + fmtPctReport(ddm.output.upside) + '</td></tr>';
-            html += '<tr><td>Margin of Safety</td><td>' + fmtPctReport(ddm.output.margin_of_safety) + '</td></tr>';
-            html += '</tbody></table>';
-
-            // Sensitivity matrix
-            if (ddm.sensitivity && ddm.sensitivity.rows) {
-                html += '<table class="data-tbl">';
-                html += '<thead><tr><th>' + ddm.sensitivity.row_label + ' \\ ' + ddm.sensitivity.col_label + '</th>';
-                ddm.sensitivity.g_values.forEach(function(g) {
-                    html += '<th>' + fmtPctReport(g) + '</th>';
-                });
-                html += '</tr></thead><tbody>';
-                ddm.sensitivity.rows.forEach(function(row) {
-                    html += '<tr><td>' + fmtPctReport(row.r) + '</td>';
-                    row.values.forEach(function(v) {
-                        html += '<td>' + (v != null ? fmtUSD(v) : '\u2014') + '</td>';
-                    });
-                    html += '</tr>';
-                });
-                html += '</tbody></table>';
-            }
-
-            html += '</div>';
-            return html;
-        }
-
-        function renderCEOInfo(ceoInfo) {
-            if (!ceoInfo) return '';
-            var html = '<div class="report-card">';
-            html += '<div class="card-accent"></div>';
-            html += '<table class="data-tbl"><tbody>';
-            html += '<tr class="sub-header"><td colspan="2">CEO STATUS</td></tr>';
-
-            if (ceoInfo.has_data) {
-                var status = ceoInfo.ceo_changed_recently ? 'CHANGED' : 'STABLE';
-                var statusClass = ceoInfo.ceo_changed_recently ? 'color: #8b5e3c' : 'color: #1a1a1a';
-                html += '<tr><td>Leadership Status</td><td style="' + statusClass + '">' + status + '</td></tr>';
-                if (ceoInfo.change_date) {
-                    html += '<tr><td>Change Date</td><td>' + ceoInfo.change_date + '</td></tr>';
-                }
-                if (ceoInfo.filing_url) {
-                    html += '<tr><td>SEC Filing</td><td><a href="' + ceoInfo.filing_url + '" target="_blank" style="color: #666; text-decoration: underline">View 8-K</a></td></tr>';
-                }
-            } else {
-                html += '<tr><td colspan="2" style="color: #999">CEO data unavailable</td></tr>';
-            }
-
-            html += '</tbody></table>';
-            if (ceoInfo.note) {
-                html += '<p style="font-size: 0.78rem; color: #666; margin-top: 8px; font-style: italic">' + ceoInfo.note + '</p>';
-            }
-            html += '</div>';
-            return html;
-        }
-
-        function renderCompensation(comp) {
-            if (!comp || !comp.has_data) {
-                return '<div class="report-card"><div class="card-accent"></div><p style="color: #999; font-size: 0.78rem">Executive compensation data unavailable</p></div>';
-            }
-            var html = '<div class="report-card">';
-            html += '<div class="card-accent"></div>';
-            html += '<table class="data-tbl"><tbody>';
-            html += '<tr class="sub-header"><td colspan="2">EXECUTIVE COMPENSATION</td></tr>';
-
-            if (comp.equity_pct != null) {
-                html += '<tr><td>Equity-Based (%)</td><td>' + fmtPctReport(comp.equity_pct) + '</td></tr>';
-            }
-            if (comp.cash_pct != null) {
-                html += '<tr><td>Cash-Based (%)</td><td>' + fmtPctReport(comp.cash_pct) + '</td></tr>';
-            }
-            if (comp.total_ceo_compensation) {
-                html += '<tr><td>Total CEO Compensation</td><td>' + fmtUSD(comp.total_ceo_compensation) + '</td></tr>';
-            }
-
-            var alignment = comp.equity_heavy ? 'Equity-heavy \u2014 aligned with shareholders' : 'Cash-heavy \u2014 review alignment';
-            html += '<tr><td>Incentive Alignment</td><td>' + alignment + '</td></tr>';
-
-            if (comp.latest_proxy_date) {
-                html += '<tr><td>Latest Proxy Date</td><td>' + comp.latest_proxy_date + '</td></tr>';
-            }
-            if (comp.filing_url) {
-                html += '<tr><td>SEC Filing</td><td><a href="' + comp.filing_url + '" target="_blank" style="color: #666; text-decoration: underline">View DEF 14A</a></td></tr>';
-            }
-
-            html += '</tbody></table>';
-            if (comp.alignment_note) {
-                html += '<p style="font-size: 0.78rem; color: #666; margin-top: 8px; font-style: italic">' + comp.alignment_note + '</p>';
-            }
-            html += '</div>';
-            return html;
-        }
-
-        function renderROI(roi) {
-            if (!roi || roi.total_roi_pct == null) return '';
-            var html = '<div class="report-card">';
-            html += '<div class="card-accent"></div>';
-            html += '<table class="data-tbl"><tbody>';
-            html += '<tr class="sub-header"><td colspan="2">RETURN ON INVESTMENT</td></tr>';
-            html += '<tr><td>Total Projected ROI</td><td style="font-weight: 500">' + fmtPctReport(roi.total_roi_pct) + '</td></tr>';
-            html += '<tr><td>Capital Gain</td><td>' + fmtPctReport(roi.capital_gain_pct) + '</td></tr>';
-            html += '<tr><td>Income Return (Dividends)</td><td>' + fmtPctReport(roi.income_return_pct) + '</td></tr>';
-            html += '<tr><td>Risk-Adjusted ROI (\u00F7 Beta)</td><td>' + fmtPctReport(roi.risk_adjusted_roi) + '</td></tr>';
-            if (roi.target_price) {
-                html += '<tr><td>Target Price</td><td>' + fmtUSD(roi.target_price) + '</td></tr>';
-            }
-            if (roi.current_price) {
-                html += '<tr><td>Current Price</td><td>' + fmtUSD(roi.current_price) + '</td></tr>';
-            }
-            html += '</tbody></table></div>';
-            return html;
-        }
-
-        function renderScoringBreakdown(scoring) {
-            if (!scoring || !scoring.has_data || !scoring.components) return '';
-            var comps = scoring.components;
-            var html = '<div class="report-card">';
-            html += '<div class="card-accent"></div>';
-            html += '<table class="data-tbl scoring-breakdown"><tbody>';
-            html += '<tr class="sub-header"><td>Component</td><td>Score</td><td>Weight</td><td>Contribution</td><td></td></tr>';
-            for (var i = 0; i < comps.length; i++) {
-                var c = comps[i];
-                var pct = Math.round(c.score * 100);
-                var hasCalc = c.calc && c.calc.inputs;
-                html += '<tr class="' + (hasCalc ? 'calc-expandable' : '') + '" data-calc-id="calc-' + i + '">';
-                html += '<td>' + escapeHtml(c.label) + (hasCalc ? ' <span class="calc-toggle">&#9662;</span>' : '') + '</td>';
-                html += '<td class="num">' + c.score.toFixed(2) + '</td>';
-                html += '<td class="num">' + (c.weight * 100).toFixed(1) + '%</td>';
-                html += '<td class="num">' + c.contribution.toFixed(3) + '</td>';
-                html += '<td class="bar-cell"><div class="scoring-bar-track"><div class="scoring-bar-fill" style="width:' + pct + '%"></div></div></td>';
-                html += '</tr>';
-                // Expandable calculation detail row (hidden by default)
-                if (hasCalc) {
-                    html += '<tr class="calc-detail-row" id="calc-' + i + '" style="display:none">';
-                    html += '<td colspan="5">';
-                    html += renderCalcDetail(c.calc);
-                    html += '</td></tr>';
-                }
-            }
-            // Composite total row
-            html += '<tr class="composite-row">';
-            html += '<td>Composite Score</td>';
-            html += '<td class="num" style="font-weight:500">' + (scoring.composite_total != null ? scoring.composite_total.toFixed(3) : '\u2014') + '</td>';
-            html += '<td></td><td></td>';
-            html += '<td class="num">Rank #' + (scoring.rank || '\u2014') + '</td>';
-            html += '</tr>';
-            html += '</tbody></table>';
-
-            // Safety gates section
-            if (scoring.safety_gates && scoring.safety_gates.length > 0) {
-                html += renderSafetyGates(scoring.safety_gates);
-            }
-
-            html += '</div>';
-            return html;
-        }
-
-        function renderCalcDetail(calc) {
-            var html = '<div class="calc-detail">';
-            // Formula
-            if (calc.formula) {
-                html += '<div class="calc-formula">' + escapeHtml(calc.formula) + '</div>';
-            }
-            // Inputs table
-            if (calc.inputs) {
-                html += '<table class="calc-inputs-tbl"><tbody>';
-                html += '<tr class="sub-header"><td>Input</td><td>Value</td></tr>';
-                var keys = Object.keys(calc.inputs);
-                for (var k = 0; k < keys.length; k++) {
-                    var val = calc.inputs[keys[k]];
-                    var displayVal = (val === null || val === undefined) ? '\u2014' : String(val);
-                    html += '<tr><td>' + escapeHtml(keys[k]) + '</td><td class="num">' + escapeHtml(displayVal) + '</td></tr>';
-                }
-                html += '</tbody></table>';
-            }
-            // Raw / winsorized / weight
-            var meta = [];
-            if (calc.raw_value != null) meta.push('Raw: ' + calc.raw_value);
-            if (calc.winsorized_value != null) meta.push('Winsorized: ' + calc.winsorized_value);
-            if (calc.weight != null) meta.push('Weight: ' + (calc.weight * 100).toFixed(1) + '%');
-            if (meta.length > 0) {
-                html += '<div class="calc-meta">' + meta.join(' \u00b7 ') + '</div>';
-            }
-            html += '</div>';
-            return html;
-        }
-
-        function renderSafetyGates(gates) {
-            var html = '<div class="safety-gates-section">';
-            html += '<div class="safety-gates-header calc-expandable" data-calc-id="safety-gates-body">Safety Gates <span class="calc-toggle">&#9662;</span></div>';
-            html += '<div class="safety-gates-body" id="safety-gates-body" style="display:none">';
-            html += '<table class="calc-inputs-tbl"><tbody>';
-            html += '<tr class="sub-header"><td>Gate</td><td>Rule</td><td>Value</td><td>Result</td></tr>';
-            for (var g = 0; g < gates.length; g++) {
-                var gate = gates[g];
-                var passClass = gate.pass ? 'gate-pass' : 'gate-fail';
-                var icon = gate.pass ? '\u2713' : '\u2717';
-                html += '<tr class="' + passClass + '">';
-                html += '<td>' + escapeHtml(gate.gate) + '</td>';
-                html += '<td>' + escapeHtml(gate.rule) + '</td>';
-                html += '<td class="num">' + escapeHtml(gate.value) + '</td>';
-                html += '<td class="gate-icon">' + icon + '</td>';
-                html += '</tr>';
-            }
-            html += '</tbody></table></div></div>';
             return html;
         }
 
@@ -862,91 +552,6 @@
             return html;
         }
 
-        function renderComps(comps) {
-            if (!comps) return "";
-            var html = "";
-
-            // Peer comparison table
-            if (comps.peers && comps.peers.length > 0) {
-                var compHeaders = ["Company", "Ticker", "EV", "EV/Rev", "EV/EBITDA", "P/E (Fwd)", "PEG", "Rev Growth", "EBITDA Margin", "Net Margin", "ROIC"];
-                html += '<div class="fin-table-wrapper"><table class="fin-table comps-table">';
-                html += '<thead><tr>';
-                for (var h = 0; h < compHeaders.length; h++) {
-                    html += '<th>' + compHeaders[h] + '</th>';
-                }
-                html += '</tr></thead><tbody>';
-
-                // Subject company first — the stock we are analysing
-                if (comps.subject) {
-                    html += compRow(comps.subject, "subject-row");
-                }
-                // Peer rows
-                for (var p = 0; p < comps.peers.length; p++) {
-                    html += compRow(comps.peers[p], "");
-                }
-                // Peer median
-                if (comps.peer_median) {
-                    html += compRow(comps.peer_median, "peer-median-row");
-                }
-                // Premium/discount
-                if (comps.premium_discount) {
-                    var pd = comps.premium_discount;
-                    html += '<tr class="premium-discount-row">';
-                    html += '<td colspan="3">Premium / (Discount)</td>';
-                    html += '<td>' + fmtPctReport(pd.ev_revenue) + '</td>';
-                    html += '<td>' + fmtPctReport(pd.ev_ebitda) + '</td>';
-                    html += '<td>' + fmtPctReport(pd.pe) + '</td>';
-                    html += '<td></td><td></td><td></td><td></td>';
-                    html += '<td>' + fmtPctReport(pd.roic) + '</td>';
-                    html += '</tr>';
-                }
-
-                html += '</tbody></table></div>';
-            }
-
-            return html;
-        }
-
-        function renderImpliedValuation(comps) {
-            if (!comps || !comps.implied_valuation || comps.implied_valuation.length === 0) return "";
-            var ivHeaders = ["Method", "Peer Median", "Subject Metric", "Implied EV", "Implied Price"];
-            var html = '<div class="fin-table-wrapper"><table class="fin-table">';
-            html += '<thead><tr>';
-            for (var ih = 0; ih < ivHeaders.length; ih++) {
-                html += '<th>' + ivHeaders[ih] + '</th>';
-            }
-            html += '</tr></thead><tbody>';
-            for (var iv = 0; iv < comps.implied_valuation.length; iv++) {
-                var row = comps.implied_valuation[iv];
-                html += '<tr>';
-                html += '<td>' + escapeHtml(row.method || "") + '</td>';
-                html += '<td>' + fmtX(row.peer_median) + '</td>';
-                html += '<td>' + fmtM(row.subject_metric) + '</td>';
-                html += '<td>' + fmtM(row.implied_ev) + '</td>';
-                html += '<td>' + fmtUSD(row.implied_price) + '</td>';
-                html += '</tr>';
-            }
-            html += '</tbody></table></div>';
-            return html;
-        }
-
-        function compRow(peer, cls) {
-            var html = '<tr class="' + cls + '">';
-            html += '<td>' + escapeHtml(peer.name || "") + '</td>';
-            html += '<td>' + escapeHtml(peer.ticker || "") + '</td>';
-            html += '<td>' + fmtB(peer.ev) + '</td>';
-            html += '<td>' + fmtX(peer.ev_revenue) + '</td>';
-            html += '<td>' + fmtX(peer.ev_ebitda) + '</td>';
-            html += '<td>' + fmtX(peer.pe_fwd) + '</td>';
-            html += '<td>' + fmtX(peer.peg) + '</td>';
-            html += '<td>' + fmtPctReport(peer.rev_growth) + '</td>';
-            html += '<td>' + fmtPctReport(peer.ebitda_margin) + '</td>';
-            html += '<td>' + fmtPctReport(peer.net_margin) + '</td>';
-            html += '<td>' + fmtPctReport(peer.roic) + '</td>';
-            html += '</tr>';
-            return html;
-        }
-
         function renderProfitability(p) {
             if (!p) return "";
             var items = [
@@ -967,35 +572,6 @@
             return html;
         }
 
-        function renderCatalysts(c) {
-            if (!c || c.length === 0) return "";
-            var html = '<div class="fin-table-wrapper"><table class="fin-table">';
-            html += '<thead><tr><th>Date</th><th>Event</th><th>Impact</th></tr></thead><tbody>';
-            for (var i = 0; i < c.length; i++) {
-                html += '<tr>';
-                html += '<td>' + escapeHtml(c[i].date || "") + '</td>';
-                html += '<td>' + escapeHtml(c[i].event || "") + '</td>';
-                html += '<td>' + escapeHtml(c[i].impact || "") + '</td>';
-                html += '</tr>';
-            }
-            html += '</tbody></table></div>';
-            return html;
-        }
-
-        function renderMoat(m) {
-            if (!m) return "";
-            var ratingClass = (m.rating || "none").toLowerCase();
-            var html = '<div class="moat-rating ' + ratingClass + '">' + escapeHtml(m.rating || "None") + ' Moat</div>';
-            if (m.description) html += '<p>' + escapeHtml(m.description) + '</p>';
-            if (m.tam || m.market_share) {
-                html += '<div class="snapshot-grid">';
-                if (m.tam) html += '<div class="snapshot-item"><span class="snapshot-label">TAM</span><span class="snapshot-value">' + fmtB(m.tam) + '</span></div>';
-                if (m.market_share) html += '<div class="snapshot-item"><span class="snapshot-label">Market Share</span><span class="snapshot-value">' + fmtPctReport(m.market_share) + '</span></div>';
-                html += '</div>';
-            }
-            return html;
-        }
-
         function renderRisks(risks) {
             if (!risks || risks.length === 0) return "";
             var html = '<div class="fin-table-wrapper"><table class="fin-table">';
@@ -1012,26 +588,6 @@
                 html += '</tr>';
             }
             html += '</tbody></table></div>';
-            return html;
-        }
-
-        function renderViewChangers(vc) {
-            if (!vc) return "";
-            var html = "";
-            if (vc.bullish && vc.bullish.length > 0) {
-                html += '<ul class="trigger-list bullish">';
-                for (var i = 0; i < vc.bullish.length; i++) {
-                    html += '<li>&#9650; ' + escapeHtml(vc.bullish[i]) + '</li>';
-                }
-                html += '</ul>';
-            }
-            if (vc.bearish && vc.bearish.length > 0) {
-                html += '<ul class="trigger-list bearish">';
-                for (var i = 0; i < vc.bearish.length; i++) {
-                    html += '<li>&#9660; ' + escapeHtml(vc.bearish[i]) + '</li>';
-                }
-                html += '</ul>';
-            }
             return html;
         }
 
@@ -1058,7 +614,6 @@
             html += '<tr class="row-subtotal"><td>Blended Target</td><td></td><td></td><td>' + fmtUSD(pt.blended) + '</td></tr>';
             html += '</tbody></table></div>';
 
-            // Visual weight bar
             var segmentClasses = ["dcf-segment", "comps-segment", "tech-segment"];
             html += '<div class="pt-bar">';
             for (var j = 0; j < rows.length; j++) {
@@ -1140,7 +695,6 @@
                 var data = await res.json();
                 renderScreenedDetail(data);
             } catch (err) {
-                // Fallback to legacy detail
                 fetchLegacyDetail(ticker);
             }
         }
@@ -1149,14 +703,9 @@
             var analysis = s.analysis || {};
             var html = "";
 
-            // Header with composite score
+            // Header with DCF upside
             html += '<div class="detail-header">';
-            html += '<div class="ticker">' + escapeHtml(s.ticker);
-            if (s.stock_category) {
-                var catLabel = s.stock_category === 'growth' ? 'GROWTH' : s.stock_category === 'dividend' ? 'DIVIDEND' : s.stock_category.toUpperCase();
-                html += '<span style="font-size:0.6rem;letter-spacing:0.08em;color:#999;background:rgba(26,26,26,0.04);padding:2px 8px;margin-left:10px;vertical-align:middle">' + catLabel + '</span>';
-            }
-            html += '</div>';
+            html += '<div class="ticker">' + escapeHtml(s.ticker) + '</div>';
             html += '<span class="name">' + escapeHtml(s.short_name || "") + '</span>';
             if (s.market_cap) {
                 html += '<span class="market-cap-label">' + formatMarketCap(s.market_cap) + '</span>';
@@ -1165,10 +714,13 @@
             if (s.industry && s.industry !== s.sector) {
                 html += '<span class="sector-label">' + escapeHtml(s.industry) + '</span>';
             }
-            html += '<div class="composite-score">';
-            html += '<span class="composite-value">' + Math.round(s.composite_score * 100) + '</span>';
-            html += '<span class="composite-label">Composite Score</span>';
-            html += '</div>';
+            if (s.dcf_upside_pct != null) {
+                var upsideSign = s.dcf_upside_pct >= 0 ? "+" : "";
+                html += '<div class="composite-score">';
+                html += '<span class="composite-value">' + upsideSign + (s.dcf_upside_pct * 100).toFixed(0) + '%</span>';
+                html += '<span class="composite-label">DCF Upside</span>';
+                html += '</div>';
+            }
             html += '</div>';
 
             // Why This Stock Was Selected
@@ -1182,23 +734,6 @@
                 }
                 html += '</ul></div>';
             }
-
-            // Forward Outlook
-            html += renderForwardOutlook(analysis);
-
-            // Component Score Breakdown
-            html += '<div class="explanation-section section-scores">';
-            html += '<div class="section-title">Score Breakdown</div>';
-            html += '<div class="score-grid">';
-            html += scoreCard("Piotroski", s.piotroski_score, fmtFScore(analysis.piotroski_f_score));
-            html += scoreCard("ROIC Spread", s.roic_spread_score, fmtPct(analysis.roic_vs_wacc_spread));
-            html += scoreCard("Cash Flow", s.cash_flow_score, fmtRatio(analysis.fcf_to_net_income, "x NI"));
-            html += scoreCard("Balance Sheet", s.balance_sheet_score, fmtAltman(analysis.altman_z_score));
-            html += scoreCard("DCF Valuation", s.dcf_score, fmtPct(analysis.dcf_upside_pct, true));
-            html += scoreCard("Income Health", s.income_health_score, fmtPct(analysis.roe, false));
-            html += scoreCard("Under-Radar", s.blindspot_score, fmtAnalysts(analysis.analyst_count));
-            html += scoreCard("Margin Trend", s.margin_score, null);
-            html += '</div></div>';
 
             // DCF Valuation Detail
             if (analysis.intrinsic_value_per_share != null) {
@@ -1233,242 +768,15 @@
             if (analysis.accruals_ratio != null) html += metricRow("Accruals Ratio", analysis.accruals_ratio.toFixed(3));
             html += '</div></div>';
 
-            // Institutional Signals
-            if (analysis.analyst_count != null || analysis.inst_ownership_pct != null || analysis.insider_cluster_buy) {
-                html += '<div class="explanation-section section-inst">';
-                html += '<div class="section-title">Institutional Signals</div>';
-                html += '<div class="metric-grid">';
-                if (analysis.analyst_count != null) html += metricRow("Analyst Coverage", analysis.analyst_count + " analysts");
-                if (analysis.inst_ownership_pct != null) html += metricRow("Inst. Ownership", (analysis.inst_ownership_pct * 100).toFixed(1) + "%");
-                if (analysis.insider_cluster_buy) html += metricRow("Insider Activity", "Cluster buying detected");
-                html += '</div></div>';
-            }
-
-            // DDM Valuation (dividend stocks)
-            if (analysis.ddm) {
-                html += '<div class="explanation-section section-ddm">';
-                html += '<div class="section-title">DDM Valuation</div>';
-                html += '<div class="metric-grid">';
-                if (analysis.ddm.output) {
-                    if (analysis.ddm.output.intrinsic_value != null)
-                        html += metricRow("Intrinsic Value (DDM)", "$" + analysis.ddm.output.intrinsic_value.toFixed(2));
-                    if (analysis.ddm.output.upside != null)
-                        html += metricRow("DDM Upside", (analysis.ddm.output.upside > 0 ? "+" : "") + (analysis.ddm.output.upside * 100).toFixed(1) + "%");
-                    if (analysis.ddm.output.margin_of_safety != null)
-                        html += metricRow("Margin of Safety", (analysis.ddm.output.margin_of_safety * 100).toFixed(1) + "%");
-                }
-                if (analysis.ddm.assumptions) {
-                    if (analysis.ddm.assumptions.growth_rate_used != null)
-                        html += metricRow("Growth Rate", (analysis.ddm.assumptions.growth_rate_used * 100).toFixed(1) + "%");
-                    if (analysis.ddm.assumptions.required_return != null)
-                        html += metricRow("Required Return", (analysis.ddm.assumptions.required_return * 100).toFixed(1) + "%");
-                }
-                html += '</div></div>';
-            }
-
-            // CEO Info
-            if (analysis.ceo_info) {
-                html += '<div class="explanation-section section-ceo">';
-                html += '<div class="section-title">CEO & Leadership</div>';
-                html += '<div class="metric-grid">';
-                if (analysis.ceo_info.has_data) {
-                    var ceoStatus = analysis.ceo_info.ceo_changed_recently ? 'Changed' : 'Stable';
-                    html += metricRow("Leadership Status", ceoStatus);
-                    if (analysis.ceo_info.change_date)
-                        html += metricRow("Change Date", analysis.ceo_info.change_date);
-                } else {
-                    html += metricRow("Status", "Data unavailable");
-                }
-                html += '</div>';
-                if (analysis.ceo_info.note) {
-                    html += '<p style="font-size:0.78rem;color:#666;margin-top:8px;font-style:italic">' + escapeHtml(analysis.ceo_info.note) + '</p>';
-                }
-                html += '</div>';
-            }
-
-            // Compensation
-            if (analysis.compensation) {
-                html += '<div class="explanation-section section-comp">';
-                html += '<div class="section-title">Compensation Structure</div>';
-                html += '<div class="metric-grid">';
-                if (analysis.compensation.has_data) {
-                    if (analysis.compensation.equity_pct != null)
-                        html += metricRow("Equity-Based", (analysis.compensation.equity_pct * 100).toFixed(1) + "%");
-                    if (analysis.compensation.cash_pct != null)
-                        html += metricRow("Cash-Based", (analysis.compensation.cash_pct * 100).toFixed(1) + "%");
-                    if (analysis.compensation.total_ceo_compensation)
-                        html += metricRow("Total CEO Comp", "$" + Number(analysis.compensation.total_ceo_compensation).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}));
-                    var alignLabel = analysis.compensation.equity_heavy ? 'Equity-heavy' : 'Cash-heavy';
-                    html += metricRow("Alignment", alignLabel);
-                } else {
-                    html += metricRow("Status", "Data unavailable");
-                }
-                html += '</div>';
-                if (analysis.compensation.alignment_note) {
-                    html += '<p style="font-size:0.78rem;color:#666;margin-top:8px;font-style:italic">' + escapeHtml(analysis.compensation.alignment_note) + '</p>';
-                }
-                html += '</div>';
-            }
-
-            // ROI Analysis
-            if (analysis.roi && analysis.roi.total_roi_pct != null) {
-                html += '<div class="explanation-section section-roi">';
-                html += '<div class="section-title">ROI Analysis</div>';
-                html += '<div class="metric-grid">';
-                html += metricRow("Total Projected ROI", (analysis.roi.total_roi_pct * 100).toFixed(1) + "%");
-                if (analysis.roi.capital_gain_pct != null)
-                    html += metricRow("Capital Gain", (analysis.roi.capital_gain_pct * 100).toFixed(1) + "%");
-                if (analysis.roi.income_return_pct != null)
-                    html += metricRow("Income Return", (analysis.roi.income_return_pct * 100).toFixed(1) + "%");
-                if (analysis.roi.risk_adjusted_roi != null)
-                    html += metricRow("Risk-Adjusted ROI", (analysis.roi.risk_adjusted_roi * 100).toFixed(1) + "%");
-                if (analysis.roi.target_price != null)
-                    html += metricRow("Target Price", "$" + analysis.roi.target_price.toFixed(2));
-                if (analysis.roi.current_price != null)
-                    html += metricRow("Current Price", "$" + analysis.roi.current_price.toFixed(2));
-                html += '</div></div>';
-            }
-
             contentEl.innerHTML = html;
-        }
-
-        // ── Forward Outlook renderer ─────────────────────────
-
-        function renderForwardOutlook(a) {
-            var outlook = a.forward_outlook;
-            var hasTrends = a.roe_4q_trend != null || a.roic_4q_trend != null ||
-                            a.gross_margin_trend != null || a.operating_margin_trend != null ||
-                            a.net_margin_4q_trend != null || a.ocf_margin_4q_trend != null;
-            var hasForwardSignals = a.implied_growth_rate != null || a.fcf_growth_3yr_cagr != null ||
-                                   a.earnings_persistence != null || a.continuous_piotroski != null;
-
-            if (!outlook && !hasTrends && !hasForwardSignals) return "";
-
-            var html = '<div class="explanation-section section-outlook">';
-            html += '<div class="section-title">Forward Outlook</div>';
-
-            // Direction header
-            if (outlook) {
-                var dir = outlook.direction || "stable";
-                var dirLabel = dir.toUpperCase();
-                var dirClass = "outlook-dir-" + dir;
-                var arrow = dir === "improving" ? "\u2197" : dir === "deteriorating" ? "\u2198" : "\u2192";
-                html += '<div class="outlook-header">';
-                html += '<div class="outlook-direction ' + dirClass + '">';
-                html += '<span class="outlook-arrow">' + arrow + '</span> ';
-                html += dirLabel;
-                html += '</div>';
-                html += '<span class="outlook-agreement">' + outlook.trend_agreement + ' of ' + outlook.trend_count + ' trends agree</span>';
-                html += '</div>';
-            }
-
-            // Trend grid
-            if (hasTrends) {
-                html += '<div class="outlook-trends">';
-                html += '<div class="outlook-subheading">Trajectory (4-Quarter Trend Slopes)</div>';
-                html += trendRow("ROE", a.roe_4q_trend);
-                html += trendRow("ROIC", a.roic_4q_trend);
-                html += trendRow("Gross Margin", a.gross_margin_trend);
-                html += trendRow("Operating Margin", a.operating_margin_trend);
-                html += trendRow("Net Margin", a.net_margin_4q_trend);
-                html += trendRow("OCF Margin", a.ocf_margin_4q_trend);
-                html += '</div>';
-            }
-
-            // Forward signals
-            if (hasForwardSignals) {
-                html += '<div class="outlook-signals">';
-                html += '<div class="outlook-subheading">Forward Signals</div>';
-                html += '<div class="metric-grid">';
-                if (a.implied_growth_rate != null)
-                    html += metricRow("Implied Growth Rate", (a.implied_growth_rate * 100).toFixed(1) + "%");
-                if (a.fcf_growth_3yr_cagr != null)
-                    html += metricRow("FCF 3yr CAGR", (a.fcf_growth_3yr_cagr * 100).toFixed(1) + "%");
-                if (a.continuous_piotroski != null)
-                    html += metricRow("Piotroski (Continuous)", Math.round(a.continuous_piotroski) + " / 100");
-                if (a.earnings_persistence != null)
-                    html += metricRow("Earnings Persistence", a.earnings_persistence.toFixed(2));
-                if (a.revenue_acceleration != null)
-                    html += metricRow("Revenue Acceleration", (a.revenue_acceleration > 0 ? "+" : "") + (a.revenue_acceleration * 100).toFixed(1) + " pp");
-                if (a.blindspot_score != null)
-                    html += metricRow("Blindspot Score", a.blindspot_score.toFixed(2));
-                html += '</div></div>';
-            }
-
-            // Insider conviction
-            if (a.insider_cluster_buy) {
-                html += '<div class="outlook-insider">';
-                html += '<span class="outlook-insider-label">Insider Conviction</span> ';
-                html += 'Cluster buying detected \u2014 management is buying their own stock';
-                html += '</div>';
-            }
-
-            html += '</div>';
-            return html;
-        }
-
-        function trendRow(label, value) {
-            if (value == null) return "";
-            var arrow, cls;
-            if (value > 0.01) { arrow = "\u25B2"; cls = "trend-up"; }
-            else if (value < -0.01) { arrow = "\u25BC"; cls = "trend-down"; }
-            else { arrow = "\u25C6"; cls = "trend-flat"; }
-            var display = (value > 0 ? "+" : "") + (value * 100).toFixed(2) + "%";
-            return '<div class="trend-row">' +
-                '<span class="trend-label">' + label + '</span>' +
-                '<span class="trend-indicator ' + cls + '">' + arrow + '</span>' +
-                '<span class="trend-value">' + display + '</span>' +
-                '</div>';
-        }
-
-        // ── Score card helpers ─────────────────────────────────
-
-        function scoreCard(label, score, detail) {
-            var pct = score != null ? Math.round(score * 100) : 0;
-            var html = '<div class="score-card">';
-            html += '<div class="sc-header">';
-            html += '<span class="sc-label">' + label + '</span>';
-            html += '<span class="sc-pct">' + pct + '</span>';
-            html += '</div>';
-            html += '<div class="sc-bar"><div class="sc-fill" style="width:' + pct + '%"></div></div>';
-            if (detail) {
-                html += '<span class="sc-detail">' + escapeHtml(detail) + '</span>';
-            }
-            html += '</div>';
-            return html;
         }
 
         function metricRow(label, value) {
             return '<div class="metric-row"><span class="metric-label">' + label + '</span><span class="metric-value">' + escapeHtml(String(value)) + '</span></div>';
         }
 
-        function fmtFScore(v) {
-            return v != null ? v + "/9" : null;
-        }
-
-        function fmtPct(v, showPlus) {
-            if (v == null) return null;
-            var s = (v * 100).toFixed(1) + "%";
-            return (showPlus && v > 0 ? "+" : "") + s;
-        }
-
-        function fmtRatio(v, suffix) {
-            if (v == null) return null;
-            return v.toFixed(1) + suffix;
-        }
-
-        function fmtAltman(v) {
-            if (v == null) return null;
-            return "Z=" + v.toFixed(1);
-        }
-
-        function fmtAnalysts(v) {
-            if (v == null) return null;
-            return v + " analysts";
-        }
-
         function fmtMarketCap(v) {
-            if (v == null) return "—";
+            if (v == null) return "\u2014";
             if (v >= 1e12) return "$" + (v / 1e12).toFixed(1) + "T";
             if (v >= 1e9) return "$" + (v / 1e9).toFixed(1) + "B";
             if (v >= 1e6) return "$" + (v / 1e6).toFixed(0) + "M";

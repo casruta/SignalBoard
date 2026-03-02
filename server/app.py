@@ -122,7 +122,7 @@ async def register_device_token(req: DeviceTokenRequest):
 
 @app.get("/screened")
 async def get_screened_stocks(limit: int = 20):
-    """Get dynamically screened stocks ranked by composite quality score."""
+    """Get dynamically screened stocks ranked by DCF undervaluation."""
     stocks = _db.get_screened_stocks(limit=limit)
     return {"stocks": stocks, "count": len(stocks)}
 
@@ -161,6 +161,11 @@ _web_dir = Path(__file__).resolve().parent.parent / "web"
 @app.get("/detail.html")
 async def detail_page():
     return FileResponse(_web_dir / "detail.html")
+
+
+@app.get("/about.html")
+async def about_page():
+    return FileResponse(_web_dir / "about.html")
 
 
 # Mount static files (CSS, JS) — must come after API routes

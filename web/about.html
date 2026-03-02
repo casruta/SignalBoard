@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SignalBoard &mdash; About</title>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/styles.css?v=12">
+</head>
+<body data-page="about">
+
+  <header class="page-header">
+    <a href="/" class="back-link">&larr; Back</a>
+    <span class="page-title">About</span>
+  </header>
+
+  <div class="about-container">
+
+    <section class="about-section">
+      <h2 class="about-heading">Project</h2>
+      <p class="about-text">
+        Finds diamonds in the dirt. A fundamentals-driven engine focused on
+        small&ndash;mid cap equities ($300M&ndash;$10B) &mdash; the under-researched,
+        undervalued, quality companies that institutional coverage overlooks.
+      </p>
+      <p class="about-text">
+        Stocks are ranked solely by DCF undervaluation &mdash; the margin of
+        safety between intrinsic value and market price. Quality metrics serve
+        as hard safety gates, not scoring dimensions.
+      </p>
+    </section>
+
+    <section class="about-section">
+      <h2 class="about-heading">Methodology</h2>
+      <p class="about-text">
+        A quantitative pipeline that screens ~3,000 US equities through
+        Damodaran-aligned safety filters, then ranks survivors by DCF
+        margin of safety.
+      </p>
+
+      <h3 class="about-subheading">DCF Model</h3>
+      <p class="about-text">
+        Damodaran-aligned FCFF (Free Cash Flow to Firm) discounted at WACC.
+        Bottom-up beta, synthetic cost of debt via interest coverage spreads,
+        convex competitive fade, scenario analysis (bear/base/bull), terminal
+        value cross-check (Gordon growth vs exit multiple), and Altman Z-based
+        distress probability adjustment.
+      </p>
+
+      <h3 class="about-subheading">Safety Gates</h3>
+      <ul class="about-list">
+        <li>Market cap $300M &ndash; $10B</li>
+        <li>Altman Z-Score &gt; 3.0</li>
+        <li>&ge; 4 quarters financial data</li>
+        <li>Revenue not declining</li>
+        <li>Piotroski F-Score &ge; 5/9</li>
+        <li>Positive free cash flow</li>
+        <li>ROIC &gt; WACC</li>
+        <li>Adequate liquidity</li>
+        <li>Minimum trading volume</li>
+        <li>DCF margin of safety &ge; 15%</li>
+      </ul>
+    </section>
+
+    <section class="about-section">
+      <h2 class="about-heading">Selection Funnel</h2>
+      <div class="about-funnel">
+        <div class="funnel-step"><span class="funnel-n">~3,000</span> US equities universe</div>
+        <div class="funnel-step"><span class="funnel-n">~1,800</span> Market cap $300M &ndash; $10B</div>
+        <div class="funnel-step"><span class="funnel-n">~900</span> Altman Z &gt; 3.0</div>
+        <div class="funnel-step"><span class="funnel-n">~600</span> 4+ quarters data</div>
+        <div class="funnel-step"><span class="funnel-n">~400</span> Revenue growing</div>
+        <div class="funnel-step"><span class="funnel-n">~250</span> Piotroski &ge; 5/9</div>
+        <div class="funnel-step"><span class="funnel-n">~150</span> FCF &gt; 0 &middot; ROIC &gt; WACC &middot; Liquidity</div>
+        <div class="funnel-step"><span class="funnel-n">Top N</span> Ranked by DCF upside</div>
+      </div>
+    </section>
+
+    <section class="about-section">
+      <p class="about-text muted">
+        Avoid the mega-caps everyone owns. Find the next great company
+        before Wall Street does.
+      </p>
+    </section>
+
+  </div>
+
+  <div class="footer"><span class="dot"></span> Live</div>
+</body>
+</html>
