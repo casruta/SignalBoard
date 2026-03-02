@@ -47,7 +47,10 @@ def compute_all_technical(prices: pd.DataFrame) -> pd.DataFrame:
     df["bb_pct"] = bb.bollinger_pband()  # %B: where price is within bands
 
     # ── ATR (volatility) ─────────────────────────────────────────
-    df["atr_14"] = ta.volatility.average_true_range(high, low, close, window=14)
+    if len(close) >= 15:
+        df["atr_14"] = ta.volatility.average_true_range(high, low, close, window=14)
+    else:
+        df["atr_14"] = np.nan
 
     # ── Momentum (N-day returns) ─────────────────────────────────
     df["momentum_5"] = close.pct_change(5)
