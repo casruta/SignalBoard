@@ -244,6 +244,19 @@
                     panel.classList.toggle('open');
                     header.classList.toggle('summary-active');
                 });
+                // Calculation detail expand/collapse on scoring row click
+                contentEl.addEventListener('click', function(e) {
+                    var row = e.target.closest('.calc-expandable');
+                    if (!row) return;
+                    var calcId = row.getAttribute('data-calc-id');
+                    var detail = document.getElementById(calcId);
+                    if (!detail) return;
+                    var isOpen = detail.style.display !== 'none';
+                    detail.style.display = isOpen ? 'none' : '';
+                    var toggle = row.querySelector('.calc-toggle');
+                    if (toggle) toggle.innerHTML = isOpen ? '&#9662;' : '&#9652;';
+                    row.classList.toggle('calc-open', !isOpen);
+                });
                 var tocEl = document.getElementById("report-toc");
                 if (tocEl) renderTOC(tocEl);
             } catch (err) {
@@ -732,22 +745,88 @@
             for (var i = 0; i < comps.length; i++) {
                 var c = comps[i];
                 var pct = Math.round(c.score * 100);
-                html += '<tr>';
-                html += '<td>' + escapeHtml(c.label) + '</td>';
+                var hasCalc = c.calc && c.calc.inputs;
+                html += '<tr class="' + (hasCalc ? 'calc-expandable' : '') + '" data-calc-id="calc-' + i + '">';
+                html += '<td>' + escapeHtml(c.label) + (hasCalc ? ' <span class="calc-toggle">&#9662;</span>' : '') + '</td>';
                 html += '<td class="num">' + c.score.toFixed(2) + '</td>';
                 html += '<td class="num">' + (c.weight * 100).toFixed(1) + '%</td>';
                 html += '<td class="num">' + c.contribution.toFixed(3) + '</td>';
                 html += '<td class="bar-cell"><div class="scoring-bar-track"><div class="scoring-bar-fill" style="width:' + pct + '%"></div></div></td>';
                 html += '</tr>';
+                // Expandable calculation detail row (hidden by default)
+                if (hasCalc) {
+                    html += '<tr class="calc-detail-row" id="calc-' + i + '" style="display:none">';
+                    html += '<td colspan="5">';
+                    html += renderCalcDetail(c.calc);
+                    html += '</td></tr>';
+                }
             }
             // Composite total row
             html += '<tr class="composite-row">';
             html += '<td>Composite Score</td>';
-            html += '<td class="num" style="font-weight:500">' + (scoring.composite_total != null ? scoring.composite_total.toFixed(3) : '—') + '</td>';
+            html += '<td class="num" style="font-weight:500">' + (scoring.composite_total != null ? scoring.composite_total.toFixed(3) : '\u2014') + '</td>';
             html += '<td></td><td></td>';
-            html += '<td class="num">Rank #' + (scoring.rank || '—') + '</td>';
+            html += '<td class="num">Rank #' + (scoring.rank || '\u2014') + '</td>';
             html += '</tr>';
-            html += '</tbody></table></div>';
+            html += '</tbody></table>';
+
+            // Safety gates section
+            if (scoring.safety_gates && scoring.safety_gates.length > 0) {
+                html += renderSafetyGates(scoring.safety_gates);
+            }
+
+            html += '</div>';
+            return html;
+        }
+
+        function renderCalcDetail(calc) {
+            var html = '<div class="calc-detail">';
+            // Formula
+            if (calc.formula) {
+                html += '<div class="calc-formula">' + escapeHtml(calc.formula) + '</div>';
+            }
+            // Inputs table
+            if (calc.inputs) {
+                html += '<table class="calc-inputs-tbl"><tbody>';
+                html += '<tr class="sub-header"><td>Input</td><td>Value</td></tr>';
+                var keys = Object.keys(calc.inputs);
+                for (var k = 0; k < keys.length; k++) {
+                    var val = calc.inputs[keys[k]];
+                    var displayVal = (val === null || val === undefined) ? '\u2014' : String(val);
+                    html += '<tr><td>' + escapeHtml(keys[k]) + '</td><td class="num">' + escapeHtml(displayVal) + '</td></tr>';
+                }
+                html += '</tbody></table>';
+            }
+            // Raw / winsorized / weight
+            var meta = [];
+            if (calc.raw_value != null) meta.push('Raw: ' + calc.raw_value);
+            if (calc.winsorized_value != null) meta.push('Winsorized: ' + calc.winsorized_value);
+            if (calc.weight != null) meta.push('Weight: ' + (calc.weight * 100).toFixed(1) + '%');
+            if (meta.length > 0) {
+                html += '<div class="calc-meta">' + meta.join(' \u00b7 ') + '</div>';
+            }
+            html += '</div>';
+            return html;
+        }
+
+        function renderSafetyGates(gates) {
+            var html = '<div class="safety-gates-section">';
+            html += '<div class="safety-gates-header calc-expandable" data-calc-id="safety-gates-body">Safety Gates <span class="calc-toggle">&#9662;</span></div>';
+            html += '<div class="safety-gates-body" id="safety-gates-body" style="display:none">';
+            html += '<table class="calc-inputs-tbl"><tbody>';
+            html += '<tr class="sub-header"><td>Gate</td><td>Rule</td><td>Value</td><td>Result</td></tr>';
+            for (var g = 0; g < gates.length; g++) {
+                var gate = gates[g];
+                var passClass = gate.pass ? 'gate-pass' : 'gate-fail';
+                var icon = gate.pass ? '\u2713' : '\u2717';
+                html += '<tr class="' + passClass + '">';
+                html += '<td>' + escapeHtml(gate.gate) + '</td>';
+                html += '<td>' + escapeHtml(gate.rule) + '</td>';
+                html += '<td class="num">' + escapeHtml(gate.value) + '</td>';
+                html += '<td class="gate-icon">' + icon + '</td>';
+                html += '</tr>';
+            }
+            html += '</tbody></table></div></div>';
             return html;
         }
 

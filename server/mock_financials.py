@@ -452,19 +452,28 @@ def _build_scoring_breakdown(signal: dict) -> dict:
     if not bd:
         return {"has_data": False}
 
+    calc_details = bd.get("calculation_details", {})
+    dim_details = calc_details.get("dimensions", {}) if calc_details else {}
+    safety_gates = calc_details.get("safety_gates", []) if calc_details else []
+
     # Order components by contribution descending
     components = []
     for key in ["piotroski", "cash_flow_quality", "roic_spread", "balance_sheet",
-                "dcf_upside", "growth_momentum", "margin_trajectory", "blindspot"]:
+                "dcf_upside", "income_health", "growth_momentum", "margin_trajectory",
+                "blindspot", "price_momentum", "low_volatility"]:
         entry = bd.get(key)
         if entry:
-            components.append({
+            comp = {
                 "key": key,
                 "label": entry["label"],
                 "score": entry["score"],
                 "weight": entry["weight"],
                 "contribution": entry["contribution"],
-            })
+            }
+            # Attach detailed calculation inputs if available
+            if key in dim_details:
+                comp["calc"] = dim_details[key]
+            components.append(comp)
     components.sort(key=lambda c: c["contribution"], reverse=True)
 
     return {
@@ -472,6 +481,7 @@ def _build_scoring_breakdown(signal: dict) -> dict:
         "components": components,
         "composite_total": bd.get("composite_total"),
         "rank": bd.get("rank"),
+        "safety_gates": safety_gates,
     }
 
 

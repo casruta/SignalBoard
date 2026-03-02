@@ -323,6 +323,8 @@ def seed_live(db_path: str, config: dict) -> None:
             "growth_momentum": ("Growth Momentum", "growth_score"),
             "margin_trajectory": ("Margin Trajectory", "margin_score"),
             "blindspot": ("Blindspot", "blindspot_score"),
+            "price_momentum": ("Price Momentum", "momentum_score"),
+            "low_volatility": ("Low Volatility", "low_vol_score"),
         }
         scoring_breakdown = {}
         for comp_key, (label, col) in component_map.items():
@@ -336,6 +338,11 @@ def seed_live(db_path: str, config: dict) -> None:
             }
         scoring_breakdown["composite_total"] = round(float(row.get("composite_score", 0)), 4)
         scoring_breakdown["rank"] = int(row.get("rank", 0))
+
+        # Attach per-dimension calculation details from screener
+        calc_details = row.get("calculation_details")
+        if calc_details:
+            scoring_breakdown["calculation_details"] = calc_details
 
         analysis = {
             "ticker": ticker,

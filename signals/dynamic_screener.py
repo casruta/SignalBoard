@@ -206,6 +206,23 @@ class DynamicScreener:
         scored["rank"] = (
             scored["composite_score"].rank(ascending=False, method="min").astype(int)
         )
+
+        # Build per-ticker calculation detail dicts for the report layer
+        scored["calculation_details"] = [
+            self._build_calculation_details(
+                ticker=tickers[i],
+                raw=raw,
+                idx=i,
+                weights=weights,
+                deep_fund=deep_fundamentals.get(tickers[i], {}),
+                dcf=dcf_results.get(tickers[i], {}),
+                info=info_map.get(tickers[i], {}),
+                price_df=(price_data or {}).get(tickers[i]),
+                config=config,
+            )
+            for i in range(len(tickers))
+        ]
+
         scored = scored.sort_values("composite_score", ascending=False).reset_index(
             drop=True
         )
@@ -442,6 +459,327 @@ class DynamicScreener:
     DCF_UPSIDE_CAP = 2.0    # +200%
     DCF_UPSIDE_FLOOR = -0.5  # -50%
 
+    # ── Calculation Detail Builders ──────────────────────────────────
+
+    def _build_calculation_details(
+        self,
+        ticker: str,
+        raw: dict[str, pd.Series],
+        idx: int,
+        weights: dict[str, float],
+        deep_fund: dict,
+        dcf: dict,
+        info: dict,
+        price_df: pd.DataFrame | None,
+        config: dict | None,
+    ) -> dict:
+        """Build a detailed calculation breakdown dict for one stock.
+
+        Returns a dict with keys for each dimension, each containing:
+        - inputs: the raw data values that fed the formula
+        - formula: human-readable description of how the raw composite was built
+        - raw_value: the pre-winsorized composite value
+        - winsorized_value: the post-winsorization value
+        - percentile_score: the 0-1 cross-sectional rank
+        - weight: the regime-adjusted weight
+        - contribution: weight * percentile_score
+        Also includes safety_gates with per-gate pass/fail details.
+        """
+        details: dict[str, dict] = {}
+
+        # ── Piotroski ──
+        pf = _safe_float(deep_fund.get("piotroski_f_score"))
+        details["piotroski"] = {
+            "label": "Piotroski F-Score",
+            "inputs": {"piotroski_f_score": _fmt(pf)},
+            "formula": "Raw = F-Score (0-9 integer)",
+            "raw_value": _fmt(pf),
+        }
+
+        # ── ROIC Spread ──
+        roic_sp = _safe_float(dcf.get("roic_vs_wacc_spread"))
+        details["roic_spread"] = {
+            "label": "ROIC vs WACC Spread",
+            "inputs": {"roic_vs_wacc_spread": _fmt(roic_sp)},
+            "formula": "Raw = ROIC − WACC",
+            "raw_value": _fmt(roic_sp),
+        }
+
+        # ── Cash Flow Quality ──
+        accruals = _safe_float(deep_fund.get("accruals_ratio"))
+        fcf_ni = _safe_float(deep_fund.get("fcf_to_net_income"))
+        inv_accruals = -accruals if not np.isnan(accruals) else np.nan
+        cf_raw = _nanmean([inv_accruals, fcf_ni])
+        details["cash_flow_quality"] = {
+            "label": "Cash Flow Quality",
+            "inputs": {
+                "accruals_ratio": _fmt(accruals),
+                "inverted_accruals": _fmt(inv_accruals),
+                "fcf_to_net_income": _fmt(fcf_ni),
+            },
+            "formula": "Raw = mean(−accruals_ratio, fcf_to_net_income)",
+            "raw_value": _fmt(cf_raw),
+        }
+
+        # ── Balance Sheet ──
+        altman = _safe_float(deep_fund.get("altman_z_score"))
+        int_cov = _safe_float(deep_fund.get("interest_coverage"))
+        bs_raw = _nanmean([altman, int_cov])
+        details["balance_sheet"] = {
+            "label": "Balance Sheet Strength",
+            "inputs": {
+                "altman_z_score": _fmt(altman),
+                "interest_coverage": _fmt(int_cov),
+            },
+            "formula": "Raw = mean(altman_z, interest_coverage)",
+            "raw_value": _fmt(bs_raw),
+        }
+
+        # ── DCF Upside ──
+        raw_dcf = _safe_float(dcf.get("dcf_upside_pct"))
+        capped_dcf = raw_dcf
+        if not np.isnan(raw_dcf):
+            capped_dcf = float(np.clip(raw_dcf, self.DCF_UPSIDE_FLOOR, self.DCF_UPSIDE_CAP))
+        details["dcf_upside"] = {
+            "label": "DCF Upside",
+            "inputs": {
+                "dcf_upside_pct": _fmt(raw_dcf),
+                "cap": f"[{self.DCF_UPSIDE_FLOOR:.0%}, {self.DCF_UPSIDE_CAP:.0%}]",
+            },
+            "formula": f"Raw = clip(dcf_upside_pct, {self.DCF_UPSIDE_FLOOR:.0%}, {self.DCF_UPSIDE_CAP:.0%})",
+            "raw_value": _fmt(capped_dcf),
+        }
+
+        # ── Income Health ──
+        rev_consist = _safe_float(deep_fund.get("revenue_growth_consistency"))
+        inv_consist = -rev_consist if not np.isnan(rev_consist) else np.nan
+        earn_persist = _safe_float(deep_fund.get("earnings_persistence"))
+        rev_ind_pctl = _safe_float(deep_fund.get("revenue_growth_industry_pctl"))
+        ih_raw = _nanmean([inv_consist, earn_persist, rev_ind_pctl])
+        details["income_health"] = {
+            "label": "Income Statement Health",
+            "inputs": {
+                "revenue_growth_consistency": _fmt(rev_consist),
+                "inverted_consistency (lower volatility = better)": _fmt(inv_consist),
+                "earnings_persistence": _fmt(earn_persist),
+                "revenue_growth_industry_pctl": _fmt(rev_ind_pctl),
+            },
+            "formula": "Raw = mean(−rev_consistency, earnings_persistence, rev_industry_pctl)",
+            "raw_value": _fmt(ih_raw),
+        }
+
+        # ── Growth Momentum ──
+        rev_g = _safe_float(info.get("revenueGrowth"))
+        earn_g = _safe_float(info.get("earningsGrowth"))
+        gm_raw = _nanmean([rev_g, earn_g])
+        details["growth_momentum"] = {
+            "label": "Growth Momentum",
+            "inputs": {
+                "revenueGrowth": _fmt(rev_g),
+                "earningsGrowth": _fmt(earn_g),
+            },
+            "formula": "Raw = mean(revenueGrowth, earningsGrowth)",
+            "raw_value": _fmt(gm_raw),
+        }
+
+        # ── Blindspot ──
+        blind = _safe_float(deep_fund.get("blindspot_score"))
+        details["blindspot"] = {
+            "label": "Institutional Blindspot",
+            "inputs": {"blindspot_score": _fmt(blind)},
+            "formula": "Raw = blindspot composite (analyst coverage, inst. ownership, insider ratio)",
+            "raw_value": _fmt(blind),
+        }
+
+        # ── Margin Trajectory ──
+        gm_trend = _safe_float(deep_fund.get("gross_margin_4q_trend"))
+        om_trend = _safe_float(deep_fund.get("operating_margin_4q_trend"))
+        mt_raw = _nanmean([gm_trend, om_trend])
+        details["margin_trajectory"] = {
+            "label": "Margin Trajectory",
+            "inputs": {
+                "gross_margin_4q_trend": _fmt(gm_trend),
+                "operating_margin_4q_trend": _fmt(om_trend),
+            },
+            "formula": "Raw = mean(gross_margin_trend, operating_margin_trend)",
+            "raw_value": _fmt(mt_raw),
+        }
+
+        # ── Price Momentum ──
+        mom = _compute_price_momentum(price_df)
+        details["price_momentum"] = {
+            "label": "Price Momentum (12−1 mo)",
+            "inputs": {
+                "price_12mo_ago": _fmt(float(price_df["Close"].iloc[-252]) if price_df is not None and len(price_df) >= 252 else np.nan),
+                "price_1mo_ago": _fmt(float(price_df["Close"].iloc[-21]) if price_df is not None and len(price_df) >= 252 else np.nan),
+            },
+            "formula": "Raw = (P_t-21 / P_t-252) − 1  [skip recent month per Jegadeesh-Titman 1993]",
+            "raw_value": _fmt(mom),
+        }
+
+        # ── Low Volatility ──
+        vol = _compute_realized_vol(price_df)
+        details["low_volatility"] = {
+            "label": "Low Volatility (60d realized, inverted)",
+            "inputs": {
+                "realized_vol_60d": _fmt(vol),
+                "annualized": f"{vol:.1%}" if not np.isnan(vol) else "N/A",
+            },
+            "formula": "Raw = −realized_vol (lower vol → higher score)",
+            "raw_value": _fmt(-vol if not np.isnan(vol) else np.nan),
+        }
+
+        # ── Attach winsorized values, percentile scores, weights, contributions ──
+        dim_to_col = {
+            "piotroski": "piotroski", "roic_spread": "roic_spread",
+            "cash_flow_quality": "cash_flow_quality", "balance_sheet": "balance_sheet",
+            "dcf_upside": "dcf_upside", "income_health": "income_health",
+            "growth_momentum": "growth_momentum", "blindspot": "blindspot",
+            "margin_trajectory": "margin_trajectory", "price_momentum": "price_momentum",
+            "low_volatility": "low_volatility",
+        }
+        for dim_key, raw_key in dim_to_col.items():
+            if dim_key in details:
+                winsorized = float(raw[raw_key].iloc[idx]) if not np.isnan(raw[raw_key].iloc[idx]) else None
+                details[dim_key]["winsorized_value"] = _fmt(winsorized) if winsorized is not None else "N/A"
+                w = weights.get(dim_key, 0.0)
+                details[dim_key]["weight"] = round(w, 4)
+
+        # ── Safety gate breakdown ──
+        safety_gates = self._evaluate_safety_gates(info, deep_fund, dcf, config)
+        return {"dimensions": details, "safety_gates": safety_gates}
+
+    def _evaluate_safety_gates(
+        self, info: dict, deep_fund: dict, dcf: dict | None = None,
+        config: dict | None = None,
+    ) -> list[dict]:
+        """Evaluate each safety gate individually and return pass/fail details."""
+        cfg_s = config.get("screening", {}) if config else {}
+        dcf = dcf or {}
+        gates: list[dict] = []
+
+        # 1. Market cap
+        mc = _safe_float(info.get("marketCap"))
+        min_cap = cfg_s.get("min_market_cap", 300_000_000)
+        max_cap = cfg_s.get("max_market_cap", 10_000_000_000)
+        gates.append({
+            "gate": "Market Cap",
+            "rule": f"${min_cap/1e6:.0f}M–${max_cap/1e9:.0f}B",
+            "value": f"${mc/1e6:.0f}M" if not np.isnan(mc) else "N/A",
+            "pass": not (np.isnan(mc) or mc < min_cap or mc > max_cap),
+        })
+
+        # 2. Altman Z
+        min_z = cfg_s.get("min_altman_z", 3.0)
+        az = _safe_float(deep_fund.get("altman_z_score"))
+        gates.append({
+            "gate": "Altman Z-Score",
+            "rule": f"> {min_z:.1f}",
+            "value": f"{az:.2f}" if not np.isnan(az) else "N/A",
+            "pass": not (np.isnan(az) or az <= min_z),
+        })
+
+        # 3. Quarters
+        quarters = deep_fund.get("quarters_available", 0)
+        min_q = cfg_s.get("min_quarters", 4)
+        gates.append({
+            "gate": "Data History",
+            "rule": f"≥ {min_q} quarters",
+            "value": str(quarters),
+            "pass": isinstance(quarters, (int, float)) and quarters >= min_q,
+        })
+
+        # 4. Revenue
+        min_rg = cfg_s.get("min_revenue_growth", 0.0)
+        rg = _safe_float(info.get("revenueGrowth"))
+        gates.append({
+            "gate": "Revenue Growth",
+            "rule": f"≥ {min_rg:.0%}",
+            "value": f"{rg:.1%}" if not np.isnan(rg) else "N/A",
+            "pass": np.isnan(rg) or rg >= min_rg,
+        })
+
+        # 5. Piotroski
+        min_p = cfg_s.get("min_piotroski", 5)
+        pf = _safe_float(deep_fund.get("piotroski_f_score"))
+        gates.append({
+            "gate": "Piotroski F-Score",
+            "rule": f"≥ {min_p}/9",
+            "value": f"{pf:.0f}" if not np.isnan(pf) else "N/A",
+            "pass": not (np.isnan(pf) or pf < min_p),
+        })
+
+        # 6. FCF
+        fy = _safe_float(dcf.get("fcf_yield"))
+        gates.append({
+            "gate": "Free Cash Flow",
+            "rule": "FCF yield > 0",
+            "value": f"{fy:.1%}" if not np.isnan(fy) else "N/A",
+            "pass": np.isnan(fy) or fy > 0,
+        })
+
+        # 7. ROIC > WACC
+        rs = _safe_float(dcf.get("roic_vs_wacc_spread"))
+        gates.append({
+            "gate": "ROIC vs WACC",
+            "rule": "ROIC > WACC (spread > 0)",
+            "value": f"{rs:+.1%}" if not np.isnan(rs) else "N/A",
+            "pass": np.isnan(rs) or rs > 0,
+        })
+
+        # 8. Liquidity
+        _INV = {"Industrials", "Materials", "Consumer Staples", "Energy"}
+        sector = info.get("sector", "")
+        if sector in _INV:
+            cr = _safe_float(deep_fund.get("current_ratio"))
+            gates.append({
+                "gate": "Liquidity (Current Ratio)",
+                "rule": "≥ 1.0 (inventory sector)",
+                "value": f"{cr:.2f}" if not np.isnan(cr) else "N/A",
+                "pass": np.isnan(cr) or cr >= 1.0,
+            })
+        else:
+            qr = _safe_float(deep_fund.get("quick_ratio"))
+            if not np.isnan(qr):
+                gates.append({
+                    "gate": "Liquidity (Quick Ratio)",
+                    "rule": "≥ 0.8 (non-inventory sector)",
+                    "value": f"{qr:.2f}",
+                    "pass": qr >= 0.8,
+                })
+            else:
+                cr = _safe_float(deep_fund.get("current_ratio"))
+                gates.append({
+                    "gate": "Liquidity (Current Ratio fallback)",
+                    "rule": "≥ 1.0",
+                    "value": f"{cr:.2f}" if not np.isnan(cr) else "N/A",
+                    "pass": np.isnan(cr) or cr >= 1.0,
+                })
+
+        # 9. Volume
+        min_vol = cfg_s.get("min_avg_daily_volume", 100_000)
+        av = _safe_float(info.get("averageVolume"))
+        gates.append({
+            "gate": "Avg Daily Volume",
+            "rule": f"≥ {min_vol:,.0f}",
+            "value": f"{av:,.0f}" if not np.isnan(av) else "N/A",
+            "pass": np.isnan(av) or av >= min_vol,
+        })
+
+        # 10. Margin of safety
+        min_mos = cfg_s.get("min_margin_of_safety", 0.15)
+        du = _safe_float(dcf.get("dcf_upside_pct"))
+        gates.append({
+            "gate": "DCF Margin of Safety",
+            "rule": f"≥ {min_mos:.0%}",
+            "value": f"{du:.1%}" if not np.isnan(du) else "N/A",
+            "pass": np.isnan(du) or du >= min_mos,
+        })
+
+        return gates
+
+    # ── Raw Value Extraction ──────────────────────────────────────────
+
     def _extract_raw_values(
         self,
         tickers: list[str],
@@ -549,6 +887,17 @@ class DynamicScreener:
 
 
 # ── Module-level helpers ──────────────────────────────────────────────
+
+
+def _fmt(v) -> str | float | None:
+    """Format a numeric value for JSON-safe display."""
+    if v is None:
+        return None
+    try:
+        f = float(v)
+        return None if np.isnan(f) else round(f, 6)
+    except (TypeError, ValueError):
+        return None
 
 
 def _safe_float(value) -> float:

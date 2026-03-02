@@ -1921,6 +1921,107 @@ body[data-page="detail"] {
   font-weight: 500;
 }
 
+/* ── Expandable calculation details ──────────────────────── */
+
+.calc-expandable {
+  cursor: pointer;
+}
+.calc-expandable:hover {
+  background: rgba(26, 26, 26, 0.04);
+}
+.calc-toggle {
+  font-size: 0.65rem;
+  color: #999;
+  margin-left: 4px;
+  vertical-align: middle;
+  transition: transform 0.2s ease;
+}
+.calc-open .calc-toggle {
+  color: #1a1a1a;
+}
+.calc-detail-row td {
+  padding: 0 !important;
+  border-bottom: none !important;
+}
+.calc-detail {
+  background: rgba(26, 26, 26, 0.025);
+  border-left: 3px solid rgba(26, 26, 26, 0.10);
+  padding: 10px 14px 12px;
+  margin: 0 0 4px 0;
+}
+.calc-formula {
+  font-size: 0.72rem;
+  color: #666;
+  letter-spacing: 0.02em;
+  margin-bottom: 8px;
+  font-style: italic;
+}
+.calc-inputs-tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+.calc-inputs-tbl td {
+  padding: 3px 8px;
+  border-bottom: 1px solid rgba(212, 208, 200, 0.3);
+}
+.calc-inputs-tbl .sub-header td {
+  background: rgba(26, 26, 26, 0.06);
+  font-weight: 500;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.calc-inputs-tbl td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.calc-meta {
+  font-size: 0.70rem;
+  color: #999;
+  margin-top: 8px;
+  letter-spacing: 0.02em;
+}
+
+/* ── Safety gates ────────────────────────────────────────── */
+
+.safety-gates-section {
+  margin-top: 16px;
+  border-top: 1px solid rgba(212, 208, 200, 0.5);
+  padding-top: 12px;
+}
+.safety-gates-header {
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #666;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.safety-gates-header:hover {
+  color: #1a1a1a;
+}
+.safety-gates-body {
+  margin-top: 8px;
+}
+.gate-pass {
+  color: #1a1a1a;
+}
+.gate-fail td {
+  color: #8b5e3c;
+  background: rgba(139, 94, 60, 0.04);
+}
+.gate-icon {
+  text-align: center;
+  font-size: 0.85rem;
+}
+.gate-pass .gate-icon {
+  color: rgba(26, 26, 26, 0.4);
+}
+.gate-fail .gate-icon {
+  color: #8b5e3c;
+}
+
 /* ── Report mobile overrides ─────────────────────────────── */
 
 @media (max-width: 768px) {
