@@ -52,16 +52,18 @@ class ScreenedStockRow(Base):
     market_cap = Column(Float)
     composite_score = Column(Float)
     rank = Column(Integer)
-    # Component scores (0-1 each)
-    piotroski_score = Column(Float)
+    # DCF-focused component scores (0-1 each)
+    dcf_upside_score = Column(Float)
+    fcf_yield_score = Column(Float)
     roic_spread_score = Column(Float)
-    cash_flow_score = Column(Float)
-    balance_sheet_score = Column(Float)
-    dcf_score = Column(Float)
-    blindspot_score = Column(Float)
-    margin_score = Column(Float)
-    stock_category = Column(String(20))
-    # Key metrics for display
+    # Key DCF metrics for display
+    intrinsic_value = Column(Float)
+    market_price = Column(Float)
+    margin_of_safety_pct = Column(Float)
+    fcf_yield_pct = Column(Float)
+    roic_spread_pct = Column(Float)
+    wacc_pct = Column(Float)
+    # Full analysis payload
     payload = Column(Text)  # Full analysis JSON (DCF, deep fundamentals, etc.)
     generated_at = Column(DateTime, default=datetime.utcnow, index=True)
 
@@ -180,14 +182,15 @@ class Database:
                     market_cap=s.get("market_cap"),
                     composite_score=s.get("composite_score"),
                     rank=s.get("rank"),
-                    piotroski_score=s.get("piotroski_score"),
+                    dcf_upside_score=s.get("dcf_upside_score"),
+                    fcf_yield_score=s.get("fcf_yield_score"),
                     roic_spread_score=s.get("roic_spread_score"),
-                    cash_flow_score=s.get("cash_flow_score"),
-                    balance_sheet_score=s.get("balance_sheet_score"),
-                    dcf_score=s.get("dcf_score"),
-                    blindspot_score=s.get("blindspot_score"),
-                    margin_score=s.get("margin_score"),
-                    stock_category=s.get("stock_category", ""),
+                    intrinsic_value=s.get("intrinsic_value"),
+                    market_price=s.get("market_price"),
+                    margin_of_safety_pct=s.get("margin_of_safety_pct"),
+                    fcf_yield_pct=s.get("fcf_yield_pct"),
+                    roic_spread_pct=s.get("roic_spread_pct"),
+                    wacc_pct=s.get("wacc_pct"),
                     payload=json.dumps(s.get("analysis", {})),
                     generated_at=datetime.utcnow(),
                 )
@@ -212,14 +215,15 @@ class Database:
                     "market_cap": r.market_cap,
                     "composite_score": r.composite_score,
                     "rank": r.rank,
-                    "piotroski_score": r.piotroski_score,
+                    "dcf_upside_score": r.dcf_upside_score,
+                    "fcf_yield_score": r.fcf_yield_score,
                     "roic_spread_score": r.roic_spread_score,
-                    "cash_flow_score": r.cash_flow_score,
-                    "balance_sheet_score": r.balance_sheet_score,
-                    "dcf_score": r.dcf_score,
-                    "blindspot_score": r.blindspot_score,
-                    "margin_score": r.margin_score,
-                    "stock_category": r.stock_category,
+                    "intrinsic_value": r.intrinsic_value,
+                    "market_price": r.market_price,
+                    "margin_of_safety_pct": r.margin_of_safety_pct,
+                    "fcf_yield_pct": r.fcf_yield_pct,
+                    "roic_spread_pct": r.roic_spread_pct,
+                    "wacc_pct": r.wacc_pct,
                     "generated_at": r.generated_at.isoformat() if r.generated_at else None,
                 }
                 for r in rows
@@ -244,14 +248,15 @@ class Database:
                 "market_cap": row.market_cap,
                 "composite_score": row.composite_score,
                 "rank": row.rank,
-                "piotroski_score": row.piotroski_score,
+                "dcf_upside_score": row.dcf_upside_score,
+                "fcf_yield_score": row.fcf_yield_score,
                 "roic_spread_score": row.roic_spread_score,
-                "cash_flow_score": row.cash_flow_score,
-                "balance_sheet_score": row.balance_sheet_score,
-                "dcf_score": row.dcf_score,
-                "blindspot_score": row.blindspot_score,
-                "margin_score": row.margin_score,
-                "stock_category": row.stock_category,
+                "intrinsic_value": row.intrinsic_value,
+                "market_price": row.market_price,
+                "margin_of_safety_pct": row.margin_of_safety_pct,
+                "fcf_yield_pct": row.fcf_yield_pct,
+                "roic_spread_pct": row.roic_spread_pct,
+                "wacc_pct": row.wacc_pct,
                 "generated_at": row.generated_at.isoformat() if row.generated_at else None,
             }
             if row.payload:

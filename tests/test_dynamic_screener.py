@@ -144,15 +144,9 @@ class TestComputeCompositeScores:
             "ticker",
             "composite_score",
             "rank",
-            "piotroski_score",
+            "dcf_upside_score",
+            "fcf_yield_score",
             "roic_spread_score",
-            "cash_flow_score",
-            "balance_sheet_score",
-            "dcf_score",
-            "income_health_score",
-            "growth_score",
-            "blindspot_score",
-            "margin_score",
             "passes_safety",
             "data_completeness",
         ]
@@ -165,9 +159,7 @@ class TestComputeCompositeScores:
         df = screener.compute_composite_scores(deep, dcf, info)
 
         score_cols = [
-            "piotroski_score", "roic_spread_score", "cash_flow_score",
-            "balance_sheet_score", "dcf_score", "blindspot_score", "margin_score",
-            "income_health_score", "growth_score",
+            "dcf_upside_score", "fcf_yield_score", "roic_spread_score",
         ]
         for col in score_cols:
             assert (df[col] >= 0).all() and (df[col] <= 1).all(), f"{col} out of [0,1]"
@@ -195,27 +187,28 @@ class TestComputeCompositeScores:
         assert df.empty
 
 
-# ── Tests: Regime weight adjustment ──────────────────────────────────
+# ── Tests: DCF Weights ───────────────────────────────────────────────
 
 
-class TestRegimeAdjustment:
-    def test_risk_off_increases_balance_sheet_weight(self):
+class TestDCFWeights:
+    def test_default_weights_sum_to_one(self):
         screener = DynamicScreener()
-        neutral = screener._get_regime_weights("neutral")
-        risk_off = screener._get_regime_weights("risk_off")
-        assert risk_off["balance_sheet"] > neutral["balance_sheet"]
+        weights = screener._get_weights()
+        assert abs(sum(weights.values()) - 1.0) < 1e-9
 
-    def test_risk_on_increases_dcf_weight(self):
+    def test_default_weights_have_three_components(self):
         screener = DynamicScreener()
-        neutral = screener._get_regime_weights("neutral")
-        risk_on = screener._get_regime_weights("risk_on")
-        assert risk_on["dcf_upside"] > neutral["dcf_upside"]
+        weights = screener._get_weights()
+        assert len(weights) == 3
+        assert "margin_of_safety" in weights
+        assert "fcf_yield" in weights
+        assert "roic_wacc_spread" in weights
 
-    def test_weights_sum_to_one(self):
+    def test_custom_weights_from_config(self):
         screener = DynamicScreener()
-        for regime in ["neutral", "risk_off", "risk_on"]:
-            weights = screener._get_regime_weights(regime)
-            assert abs(sum(weights.values()) - 1.0) < 1e-9
+        config = {"screening": {"weights": {"margin_of_safety": 0.5, "fcf_yield": 0.3, "roic_wacc_spread": 0.2}}}
+        weights = screener._get_weights(config=config)
+        assert abs(sum(weights.values()) - 1.0) < 1e-9
 
 
 # ── Tests: Safety filter ─────────────────────────────────────────────

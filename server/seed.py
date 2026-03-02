@@ -312,17 +312,11 @@ def seed_live(db_path: str, config: dict) -> None:
             verification = {"all_passed": None, "summary": "Verification unavailable"}
 
         # ── Scoring breakdown (per-component transparency) ──
-        weights = screener._get_regime_weights(macro_regime, config=config)
+        weights = screener._get_weights(config=config)
         component_map = {
-            "piotroski": ("Piotroski F-Score", "piotroski_score"),
-            "cash_flow_quality": ("Cash Flow Quality", "cash_flow_score"),
-            "roic_spread": ("ROIC vs WACC", "roic_spread_score"),
-            "balance_sheet": ("Balance Sheet", "balance_sheet_score"),
-            "dcf_upside": ("DCF Upside", "dcf_score"),
-            "income_health": ("Income Health", "income_health_score"),
-            "growth_momentum": ("Growth Momentum", "growth_score"),
-            "margin_trajectory": ("Margin Trajectory", "margin_score"),
-            "blindspot": ("Blindspot", "blindspot_score"),
+            "margin_of_safety": ("Margin of Safety", "dcf_upside_score"),
+            "fcf_yield": ("FCF Yield", "fcf_yield_score"),
+            "roic_wacc_spread": ("ROIC vs WACC", "roic_spread_score"),
         }
         scoring_breakdown = {}
         for comp_key, (label, col) in component_map.items():
@@ -339,25 +333,26 @@ def seed_live(db_path: str, config: dict) -> None:
 
         analysis = {
             "ticker": ticker,
-            "stock_category": "growth",
-            "piotroski_f_score": deep.get("piotroski_f_score"),
-            "roic_vs_wacc_spread": dcf.get("roic_vs_wacc_spread"),
-            "altman_z_score": deep.get("altman_z_score"),
+            # Core DCF valuation
+            "intrinsic_value_per_share": dcf.get("intrinsic_value_per_share"),
             "dcf_upside_pct": dcf.get("dcf_upside_pct"),
             "dcf_margin_of_safety": dcf.get("margin_of_safety"),
-            "intrinsic_value_per_share": dcf.get("intrinsic_value_per_share"),
             "wacc": dcf.get("wacc"),
+            "roic": dcf.get("roic"),
+            "roic_vs_wacc_spread": dcf.get("roic_vs_wacc_spread"),
             "fcf_yield": dcf.get("fcf_yield"),
             "ev_to_fcf": dcf.get("ev_to_fcf"),
-            "interest_coverage": deep.get("interest_coverage"),
-            "current_ratio": deep.get("current_ratio"),
-            "pe_ratio": info.get("trailingPE"),
-            "pb_ratio": info.get("priceToBook"),
-            "roe": info.get("returnOnEquity"),
-            "debt_to_equity": info.get("debtToEquity"),
+            "net_debt": dcf.get("net_debt"),
+            "implied_growth_rate": dcf.get("implied_growth_rate"),
+            # Scenario analysis
+            "bear_iv": dcf.get("bear_iv"),
+            "base_iv": dcf.get("base_iv"),
+            "bull_iv": dcf.get("bull_iv"),
+            "scenario_range_pct": dcf.get("scenario_range_pct"),
+            # Quality gates (for context)
+            "piotroski_f_score": deep.get("piotroski_f_score"),
+            "altman_z_score": deep.get("altman_z_score"),
             "market_cap": info.get("marketCap"),
-            "accruals_ratio": deep.get("accruals_ratio"),
-            "dividend_yield": info.get("dividendYield"),
             # CEO and compensation
             "ceo_info": ceo_info,
             "compensation": comp_info,
@@ -388,16 +383,15 @@ def seed_live(db_path: str, config: dict) -> None:
             "market_cap": info.get("marketCap"),
             "composite_score": row.get("composite_score"),
             "rank": int(row.get("rank", 0)),
-            "stock_category": "growth",
-            "piotroski_score": row.get("piotroski_score"),
+            "dcf_upside_score": row.get("dcf_upside_score"),
+            "fcf_yield_score": row.get("fcf_yield_score"),
             "roic_spread_score": row.get("roic_spread_score"),
-            "cash_flow_score": row.get("cash_flow_score"),
-            "balance_sheet_score": row.get("balance_sheet_score"),
-            "dcf_score": row.get("dcf_score"),
-            "income_health_score": row.get("income_health_score"),
-            "growth_score": row.get("growth_score"),
-            "blindspot_score": row.get("blindspot_score"),
-            "margin_score": row.get("margin_score"),
+            "intrinsic_value": dcf.get("intrinsic_value_per_share"),
+            "market_price": current_price,
+            "margin_of_safety_pct": dcf.get("dcf_upside_pct"),
+            "fcf_yield_pct": dcf.get("fcf_yield"),
+            "roic_spread_pct": dcf.get("roic_vs_wacc_spread"),
+            "wacc_pct": dcf.get("wacc"),
             "analysis": analysis,
         })
 
@@ -654,36 +648,34 @@ def _fmt_cap(mkt_cap: float) -> str:
 
 
 def _build_reasons(deep: dict, dcf: dict, info: dict) -> list[str]:
-    """Generate plain-English reasons from fundamental data."""
+    """Generate DCF-focused plain-English reasons."""
     import numpy as np
 
     reasons: list[str] = []
 
-    pf = deep.get("piotroski_f_score")
-    if pf is not None and not np.isnan(pf) and pf >= 6:
-        reasons.append(f"Piotroski F-Score {int(pf)}/9 — strong financial health")
-
-    spread = dcf.get("roic_vs_wacc_spread")
-    if spread is not None and not np.isnan(spread) and spread > 0:
-        reasons.append(f"ROIC exceeds cost of capital by {spread*100:.1f}%")
-
+    intrinsic = dcf.get("intrinsic_value_per_share")
     mos = dcf.get("margin_of_safety")
-    if mos is not None and not np.isnan(mos) and mos > 0:
-        intrinsic = dcf.get("intrinsic_value_per_share", 0)
-        reasons.append(
-            f"DCF intrinsic value ${intrinsic:.2f} with {mos*100:.0f}% margin of safety"
-        )
+    upside = dcf.get("dcf_upside_pct")
+    current_price = info.get("currentPrice") or info.get("previousClose")
+
+    if intrinsic is not None and upside is not None and current_price:
+        if not np.isnan(intrinsic) and not np.isnan(upside):
+            reasons.append(
+                f"DCF intrinsic value ${intrinsic:.2f} vs ${current_price:.2f} market price "
+                f"— {upside:+.0%} upside with {mos:.0%} margin of safety"
+            )
 
     fcf_y = dcf.get("fcf_yield")
-    if fcf_y is not None and not np.isnan(fcf_y) and fcf_y > 0.04:
-        reasons.append(f"Free cash flow yield {fcf_y*100:.1f}%")
+    if fcf_y is not None and not np.isnan(fcf_y) and fcf_y > 0:
+        reasons.append(f"Free cash flow yield {fcf_y:.1%}")
 
-    z = deep.get("altman_z_score")
-    if z is not None and not np.isnan(z) and z > 3:
-        reasons.append(f"Altman Z-Score {z:.1f} — financially sound")
-
-    ic = deep.get("interest_coverage")
-    if ic is not None and not np.isnan(ic) and ic > 5:
-        reasons.append(f"Interest coverage {ic:.1f}x — ample debt service capacity")
+    spread = dcf.get("roic_vs_wacc_spread")
+    wacc = dcf.get("wacc")
+    roic = dcf.get("roic")
+    if spread is not None and not np.isnan(spread) and spread > 0:
+        if roic is not None and wacc is not None:
+            reasons.append(f"ROIC {roic:.1%} vs WACC {wacc:.1%} — creating economic value")
+        else:
+            reasons.append(f"ROIC exceeds cost of capital by {spread:.1%}")
 
     return reasons

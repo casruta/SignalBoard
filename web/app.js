@@ -12,50 +12,6 @@
 
     function initListPage() {
         var container = document.getElementById("ticker-container");
-        // Wire nav buttons to overlays
-        document.querySelectorAll(".nav-btn").forEach(function (btn) {
-            btn.addEventListener("click", function () {
-                var id = btn.getAttribute("data-overlay");
-                var overlay = document.getElementById(id);
-                if (overlay) overlay.classList.add("open");
-            });
-        });
-
-        document.querySelectorAll(".overlay").forEach(function (overlay) {
-            var closeBtn = overlay.querySelector(".overlay-close");
-            if (closeBtn) {
-                closeBtn.addEventListener("click", function () {
-                    overlay.classList.remove("open");
-                });
-            }
-            overlay.addEventListener("click", function (e) {
-                if (e.target === overlay) overlay.classList.remove("open");
-            });
-        });
-
-        // Animate methodology overlay components on open
-        document.querySelectorAll(".nav-btn").forEach(function (btn) {
-            btn.addEventListener("click", function () {
-                var id = btn.getAttribute("data-overlay");
-                if (id === "methodology-overlay") {
-                    setTimeout(function () {
-                        // Animate scoring dimension bars
-                        document.querySelectorAll(".dim-fill").forEach(function (fill) {
-                            var w = fill.getAttribute("data-width");
-                            if (w) fill.style.width = w + "%";
-                        });
-                        // Stagger funnel rows
-                        document.querySelectorAll(".funnel-row").forEach(function (row, i) {
-                            setTimeout(function () {
-                                row.style.transition = "opacity 0.4s ease, transform 0.4s ease";
-                                row.style.opacity = "1";
-                                row.style.transform = "translateY(0)";
-                            }, i * 100);
-                        });
-                    }, 150);
-                }
-            });
-        });
 
         fetchScreenedStocks();
 
@@ -67,25 +23,15 @@
                 if (stocks.length > 0) {
                     renderStocks(stocks);
                 } else {
-                    // Fallback to signals if no screened stocks yet
-                    fetchSignals();
+                    container.innerHTML =
+                        '<div class="empty-state">' +
+                        '<div class="title">No Stocks Screened</div>' +
+                        '<div class="subtitle">The DCF screener has not run yet.</div>' +
+                        "</div>";
                 }
-            } catch (err) {
-                fetchSignals();
-            }
-        }
-
-        async function fetchSignals() {
-            try {
-                var res = await fetch("/signals");
-                var data = await res.json();
-                var signals = data.signals || [];
-                var top3 = signals.slice(0, 3);
-                renderLegacyTickers(top3);
             } catch (err) {
                 container.innerHTML =
                     '<div class="empty-state">' +
-                    '<div class="icon">&#9888;</div>' +
                     '<div class="title">Connection Error</div>' +
                     '<div class="subtitle">Could not reach the SignalBoard API.</div>' +
                     "</div>";
@@ -93,20 +39,9 @@
         }
 
         function renderStocks(stocks) {
-            if (stocks.length === 0) {
-                container.innerHTML =
-                    '<div class="empty-state">' +
-                    '<div class="icon">&#8212;</div>' +
-                    '<div class="title">No Stocks Screened</div>' +
-                    '<div class="subtitle">The screener has not run yet.</div>' +
-                    "</div>";
-                return;
-            }
-
-            var html = '<hr class="rule">';
+            var html = "";
             for (var i = 0; i < stocks.length; i++) {
-                html += renderStockRow(stocks[i], i);
-                html += '<hr class="rule">';
+                html += renderStockCard(stocks[i], i);
             }
 
             // Pick generation date
@@ -114,84 +49,72 @@
                 var d = new Date(stocks[0].generated_at);
                 var months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
                 var dateStr = months[d.getMonth()] + " " + d.getDate() + ", " + d.getFullYear();
-                html += '<div class="pick-date">Picks generated ' + dateStr + '</div>';
+                html += '<div class="pick-date">Screened ' + dateStr + '</div>';
             }
             container.innerHTML = html;
         }
 
-        function renderStockRow(s, index) {
-            var score = s.composite_score != null ? Math.round(s.composite_score * 100) : "—";
+        function renderStockCard(s, index) {
             var rank = s.rank || (index + 1);
+            var upside = s.margin_of_safety_pct;
+            var upsideStr = upside != null ? (upside >= 0 ? "+" : "") + Math.round(upside * 100) + "%" : "\u2014";
+            var intrinsic = s.intrinsic_value;
+            var price = s.market_price;
+            var fcfYield = s.fcf_yield_pct;
+            var roicSpread = s.roic_spread_pct;
+            var wacc = s.wacc_pct;
 
-            var html = '<a class="ticker-row" href="/detail.html?ticker=' + encodeURIComponent(s.ticker) + '&source=screened">';
-            html += '<div class="row-main">';
-            html += '<span class="rank">#' + rank + '</span>';
-            html += '<div class="row-info">';
-            html += '<span class="symbol">' + escapeHtml(s.ticker) + '</span>';
-            html += '<span class="name-label">' + escapeHtml(s.short_name || "") + '</span>';
+            var html = '<a class="stock-card" href="/detail.html?ticker=' + encodeURIComponent(s.ticker) + '&source=screened">';
+
+            // Top row: rank + ticker | upside %
+            html += '<div class="card-top">';
+            html += '<div class="card-left">';
+            html += '<span class="card-rank">#' + rank + '</span>';
+            html += '<span class="card-ticker">' + escapeHtml(s.ticker) + '</span>';
+            html += '</div>';
+            html += '<span class="card-upside">' + upsideStr + '</span>';
+            html += '</div>';
+
+            // Sub row: name | market cap
+            html += '<div class="card-sub">';
+            html += '<span class="card-name">' + escapeHtml(s.short_name || "") + '</span>';
             if (s.market_cap) {
-                html += '<span class="market-cap-label">' + formatMarketCap(s.market_cap) + '</span>';
-            }
-            html += '</div>';
-            html += '<span class="score">' + score + '</span>';
-            html += '</div>';
-
-            // Mini score bars
-            html += '<div class="score-bars">';
-            html += miniBar("Piotroski", s.piotroski_score);
-            html += miniBar("Cash Flow", s.cash_flow_score);
-            html += miniBar("ROIC Spread", s.roic_spread_score);
-            html += miniBar("Balance Sheet", s.balance_sheet_score);
-            html += miniBar("DCF", s.dcf_score);
-            html += miniBar("Income Health", s.income_health_score);
-            html += miniBar("Growth", s.growth_score);
-            html += miniBar("Margins", s.margin_score);
-            html += miniBar("Blindspot", s.blindspot_score);
-            if (s.stock_category === 'dividend' && s.analysis && s.analysis.dividend_yield != null) {
-                html += '<div class="mini-bar"><span class="div-yield-indicator">DIV YIELD ' + (s.analysis.dividend_yield * 100).toFixed(1) + '%</span></div>';
-            } else if (s.stock_category === 'dividend' && s.dividend_yield != null) {
-                html += '<div class="mini-bar"><span class="div-yield-indicator">DIV YIELD ' + (s.dividend_yield * 100).toFixed(1) + '%</span></div>';
+                html += '<span class="card-cap">' + formatMarketCap(s.market_cap) + '</span>';
             }
             html += '</div>';
 
-            html += '<span class="industry">' + escapeHtml(s.sector || "") + '</span>';
+            // DCF valuation grid
+            html += '<div class="card-valuation">';
+            html += valRow("Intrinsic Value", intrinsic != null ? "$" + intrinsic.toFixed(2) : "\u2014");
+            html += valRow("Market Price", price != null ? "$" + price.toFixed(2) : "\u2014");
+            html += valRow("Margin of Safety", upside != null ? Math.round(upside * 100) + "%" : "\u2014", true);
+            html += valRow("WACC", wacc != null ? (wacc * 100).toFixed(1) + "%" : "\u2014");
+            html += '</div>';
+
+            // Footer: FCF yield, ROIC-WACC | sector
+            html += '<div class="card-footer">';
+            html += '<div class="card-metrics">';
+            if (fcfYield != null) {
+                html += '<span class="card-metric">FCF Yield <span>' + (fcfYield * 100).toFixed(1) + '%</span></span>';
+            }
+            if (roicSpread != null) {
+                html += '<span class="card-metric">ROIC-WACC <span>' + (roicSpread >= 0 ? "+" : "") + (roicSpread * 100).toFixed(1) + 'pp</span></span>';
+            }
+            html += '</div>';
+            html += '<span class="card-sector">' + escapeHtml(s.sector || "") + '</span>';
+            html += '</div>';
+
             html += '</a>';
             return html;
         }
 
-        function miniBar(label, value) {
-            var pct = value != null ? Math.round(value * 100) : 0;
+        function valRow(label, value, accent) {
             return (
-                '<div class="mini-bar">' +
-                '<span class="mini-label">' + label + '</span>' +
-                '<div class="mini-track"><div class="mini-fill" style="width:' + pct + '%"></div></div>' +
+                '<div class="val-row">' +
+                '<span class="val-label">' + label + '</span>' +
+                '<span class="val-value' + (accent ? ' accent' : '') + '">' + value + '</span>' +
                 '</div>'
             );
-        }
-
-        function renderLegacyTickers(signals) {
-            if (signals.length === 0) {
-                container.innerHTML =
-                    '<div class="empty-state">' +
-                    '<div class="icon">&#8212;</div>' +
-                    '<div class="title">No Signals</div>' +
-                    '<div class="subtitle">The algorithm has not generated signals yet.</div>' +
-                    "</div>";
-                return;
-            }
-
-            var html = '<hr class="rule">';
-            for (var i = 0; i < signals.length; i++) {
-                html += '<a class="ticker-row" href="/detail.html?ticker=' + encodeURIComponent(signals[i].ticker) + '">';
-                html += '<div class="row-main">';
-                html += '<div class="row-info">';
-                html += '<span class="symbol">' + escapeHtml(signals[i].ticker) + '</span>';
-                html += '</div>';
-                html += '</div>';
-                html += '<span class="industry">' + escapeHtml(signals[i].sector || "") + '</span>';
-                html += '</a><hr class="rule">';
-            }
-            container.innerHTML = html;
         }
     }
 
@@ -1107,18 +1030,13 @@
             // Forward Outlook
             html += renderForwardOutlook(analysis);
 
-            // Component Score Breakdown
+            // DCF Score Breakdown
             html += '<div class="explanation-section section-scores">';
-            html += '<div class="section-title">Score Breakdown</div>';
+            html += '<div class="section-title">DCF Score Breakdown</div>';
             html += '<div class="score-grid">';
-            html += scoreCard("Piotroski", s.piotroski_score, fmtFScore(analysis.piotroski_f_score));
-            html += scoreCard("ROIC Spread", s.roic_spread_score, fmtPct(analysis.roic_vs_wacc_spread));
-            html += scoreCard("Cash Flow", s.cash_flow_score, fmtRatio(analysis.fcf_to_net_income, "x NI"));
-            html += scoreCard("Balance Sheet", s.balance_sheet_score, fmtAltman(analysis.altman_z_score));
-            html += scoreCard("DCF Valuation", s.dcf_score, fmtPct(analysis.dcf_upside_pct, true));
-            html += scoreCard("Income Health", s.income_health_score, fmtPct(analysis.roe, false));
-            html += scoreCard("Under-Radar", s.blindspot_score, fmtAnalysts(analysis.analyst_count));
-            html += scoreCard("Margin Trend", s.margin_score, null);
+            html += scoreCard("Margin of Safety", s.dcf_upside_score, fmtPct(analysis.dcf_upside_pct, true));
+            html += scoreCard("FCF Yield", s.fcf_yield_score, fmtPct(analysis.fcf_yield));
+            html += scoreCard("ROIC vs WACC", s.roic_spread_score, fmtPct(analysis.roic_vs_wacc_spread));
             html += '</div></div>';
 
             // DCF Valuation Detail
@@ -1311,8 +1229,8 @@
                     html += metricRow("Earnings Persistence", a.earnings_persistence.toFixed(2));
                 if (a.revenue_acceleration != null)
                     html += metricRow("Revenue Acceleration", (a.revenue_acceleration > 0 ? "+" : "") + (a.revenue_acceleration * 100).toFixed(1) + " pp");
-                if (a.blindspot_score != null)
-                    html += metricRow("Blindspot Score", a.blindspot_score.toFixed(2));
+                if (a.implied_growth_rate != null)
+                    html += metricRow("Implied Growth Rate", (a.implied_growth_rate * 100).toFixed(1) + "%");
                 html += '</div></div>';
             }
 

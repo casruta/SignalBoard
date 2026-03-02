@@ -122,7 +122,7 @@ async def register_device_token(req: DeviceTokenRequest):
 
 @app.get("/screened")
 async def get_screened_stocks(limit: int = 20):
-    """Get dynamically screened stocks ranked by composite quality score."""
+    """Get DCF-screened stocks ranked by intrinsic value discount."""
     stocks = _db.get_screened_stocks(limit=limit)
     return {"stocks": stocks, "count": len(stocks)}
 

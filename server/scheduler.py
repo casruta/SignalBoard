@@ -294,6 +294,10 @@ def _run_screener(
 
         analysis = _build_analysis_payload(ticker, info, deep, dcf)
 
+        # Extract key DCF metrics for display columns
+        intrinsic = dcf.get("intrinsic_value_per_share")
+        current_price = info.get("currentPrice") or info.get("previousClose")
+
         results.append({
             "ticker": ticker,
             "short_name": info.get("shortName", ticker),
@@ -302,13 +306,15 @@ def _run_screener(
             "market_cap": info.get("marketCap"),
             "composite_score": float(row["composite_score"]),
             "rank": int(row["rank"]),
-            "piotroski_score": float(row.get("piotroski_score", 0)),
+            "dcf_upside_score": float(row.get("dcf_upside_score", 0)),
+            "fcf_yield_score": float(row.get("fcf_yield_score", 0)),
             "roic_spread_score": float(row.get("roic_spread_score", 0)),
-            "cash_flow_score": float(row.get("cash_flow_score", 0)),
-            "balance_sheet_score": float(row.get("balance_sheet_score", 0)),
-            "dcf_score": float(row.get("dcf_score", 0)),
-            "blindspot_score": float(row.get("blindspot_score", 0)),
-            "margin_score": float(row.get("margin_score", 0)),
+            "intrinsic_value": intrinsic,
+            "market_price": current_price,
+            "margin_of_safety_pct": dcf.get("dcf_upside_pct"),
+            "fcf_yield_pct": dcf.get("fcf_yield"),
+            "roic_spread_pct": dcf.get("roic_vs_wacc_spread"),
+            "wacc_pct": dcf.get("wacc"),
             "analysis": analysis,
         })
 
@@ -318,151 +324,82 @@ def _run_screener(
 def _build_analysis_payload(
     ticker: str, info: dict, deep: dict, dcf: dict
 ) -> dict:
-    """Build the detailed analysis JSON for a screened stock."""
+    """Build the detailed DCF-focused analysis JSON for a screened stock."""
     payload = {"ticker": ticker}
 
-    # Selection reasons (human-readable)
     reasons = []
 
-    # Piotroski
-    f_score = deep.get("piotroski_f_score")
-    if f_score is not None:
-        payload["piotroski_f_score"] = f_score
-        if f_score >= 7:
-            reasons.append(f"Strong Piotroski F-Score of {f_score}/9 — indicates robust financial health across profitability, leverage, and efficiency")
-        elif f_score >= 5:
-            reasons.append(f"Moderate Piotroski F-Score of {f_score}/9 — solid but not exceptional financial fundamentals")
-
-    # DCF valuation
-    mos = dcf.get("margin_of_safety")
+    # ── Core DCF Valuation ────────────────────────────────────────
+    intrinsic = dcf.get("intrinsic_value_per_share")
     upside = dcf.get("dcf_upside_pct")
-    if mos is not None and upside is not None:
-        payload["dcf_margin_of_safety"] = mos
-        payload["dcf_upside_pct"] = upside
-        payload["intrinsic_value_per_share"] = dcf.get("intrinsic_value_per_share")
-        payload["wacc"] = dcf.get("wacc")
-        if mos > 0.2:
-            reasons.append(f"DCF analysis suggests {upside:+.0%} upside with {mos:.0%} margin of safety — trading well below estimated intrinsic value")
-        elif mos > 0:
-            reasons.append(f"Modestly undervalued by DCF: {upside:+.0%} upside potential")
-
-    # ROIC vs WACC
+    mos = dcf.get("margin_of_safety")
+    wacc = dcf.get("wacc")
+    roic = dcf.get("roic")
     roic_spread = dcf.get("roic_vs_wacc_spread")
+    fcf_yield = dcf.get("fcf_yield")
+
+    if intrinsic is not None:
+        payload["intrinsic_value_per_share"] = intrinsic
+    if upside is not None:
+        payload["dcf_upside_pct"] = upside
+    if mos is not None:
+        payload["dcf_margin_of_safety"] = mos
+    if wacc is not None:
+        payload["wacc"] = wacc
+    if roic is not None:
+        payload["roic"] = roic
     if roic_spread is not None:
         payload["roic_vs_wacc_spread"] = roic_spread
-        if roic_spread > 0.05:
-            reasons.append(f"Creating significant shareholder value: ROIC exceeds cost of capital by {roic_spread:.1%}")
-        elif roic_spread > 0:
-            reasons.append(f"Positive economic value creation: ROIC beats WACC by {roic_spread:.1%}")
-
-    # Cash flow quality
-    accruals = deep.get("accruals_ratio")
-    fcf_ni = deep.get("fcf_to_net_income")
-    if accruals is not None:
-        payload["accruals_ratio"] = accruals
-        if accruals < -0.05:
-            reasons.append("Conservative accounting: cash flows significantly exceed reported earnings (negative accruals ratio)")
-    if fcf_ni is not None:
-        payload["fcf_to_net_income"] = fcf_ni
-        if fcf_ni > 1.0:
-            reasons.append(f"High-quality earnings: FCF is {fcf_ni:.1f}x net income — cash generation exceeds accounting profits")
-
-    # Balance sheet
-    altman = deep.get("altman_z_score")
-    if altman is not None:
-        payload["altman_z_score"] = altman
-        if altman > 3.0:
-            reasons.append(f"Fortress balance sheet: Altman Z-Score of {altman:.1f} (well above the 2.99 safe zone)")
-
-    int_cov = deep.get("interest_coverage")
-    if int_cov is not None:
-        payload["interest_coverage"] = int_cov
-
-    # Margin trends
-    gm_trend = deep.get("gross_margin_4q_trend")
-    om_trend = deep.get("operating_margin_4q_trend")
-    if gm_trend is not None and gm_trend > 0:
-        payload["gross_margin_trend"] = gm_trend
-        reasons.append("Expanding gross margins over recent quarters — improving pricing power or cost efficiency")
-    if om_trend is not None and om_trend > 0:
-        payload["operating_margin_trend"] = om_trend
-        reasons.append("Operating margins trending upward — demonstrates growing operational leverage")
-
-    # Institutional blindspot
-    analyst_count = deep.get("analyst_count")
-    inst_ownership = deep.get("inst_ownership_pct")
-    if analyst_count is not None:
-        payload["analyst_count"] = analyst_count
-        if analyst_count < 5:
-            reasons.append(f"Under-researched: only {analyst_count} analysts cover this stock — more room for pricing inefficiency")
-    if inst_ownership is not None:
-        payload["inst_ownership_pct"] = inst_ownership
-        if inst_ownership < 0.4:
-            reasons.append(f"Low institutional ownership ({inst_ownership:.0%}) — potential for institutional discovery as fundamentals improve")
-
-    insider_buy = deep.get("insider_cluster_buy")
-    if insider_buy:
-        payload["insider_cluster_buy"] = True
-        reasons.append("Recent cluster of insider buying — management is putting their own money in")
-
-    # FCF yield
-    fcf_yield = dcf.get("fcf_yield")
     if fcf_yield is not None:
         payload["fcf_yield"] = fcf_yield
-        if fcf_yield > 0.06:
-            reasons.append(f"Attractive {fcf_yield:.1%} free cash flow yield — strong cash generation relative to market price")
 
-    # EV/FCF
-    ev_fcf = dcf.get("ev_to_fcf")
-    if ev_fcf is not None and ev_fcf > 0:
-        payload["ev_to_fcf"] = ev_fcf
-
-    # Forward outlook fields (already computed by fundamental_deep, not yet surfaced)
-    for key in ("roe_4q_trend", "roic_4q_trend", "net_margin_4q_trend",
-                "ocf_margin_4q_trend", "revenue_acceleration",
-                "fcf_growth_3yr_cagr", "earnings_persistence",
-                "continuous_piotroski", "blindspot_score"):
-        val = deep.get(key)
+    # Scenario analysis (bear/base/bull)
+    for key in ("bear_iv", "base_iv", "bull_iv", "scenario_range_pct"):
+        val = dcf.get(key)
         if val is not None and not (isinstance(val, float) and np.isnan(val)):
             payload[key] = val
 
-    # Implied growth rate from DCF
+    # EV/FCF and implied growth
+    ev_fcf = dcf.get("ev_to_fcf")
+    if ev_fcf is not None and not (isinstance(ev_fcf, float) and np.isnan(ev_fcf)):
+        payload["ev_to_fcf"] = ev_fcf
+
     ig = dcf.get("implied_growth_rate")
-    if ig is not None and not np.isnan(ig):
+    if ig is not None and not (isinstance(ig, float) and np.isnan(ig)):
         payload["implied_growth_rate"] = ig
 
-    # Synthesize forward direction from trend slopes
-    trend_keys = ("roe_4q_trend", "roic_4q_trend", "gross_margin_4q_trend",
-                  "operating_margin_4q_trend", "net_margin_4q_trend",
-                  "ocf_margin_4q_trend")
-    trends = [deep.get(k) for k in trend_keys]
-    trends = [t for t in trends if t is not None and not np.isnan(t)]
-    if trends:
-        improving = sum(1 for t in trends if t > 0.01)
-        declining = sum(1 for t in trends if t < -0.01)
-        total = len(trends)
-        if improving > total / 2:
-            direction = "improving"
-            agreement = improving
-        elif declining > total / 2:
-            direction = "deteriorating"
-            agreement = declining
-        else:
-            direction = "stable"
-            agreement = total - improving - declining
-        payload["forward_outlook"] = {
-            "direction": direction,
-            "trend_agreement": agreement,
-            "trend_count": total,
-        }
+    net_debt = dcf.get("net_debt")
+    if net_debt is not None and not (isinstance(net_debt, float) and np.isnan(net_debt)):
+        payload["net_debt"] = net_debt
+
+    # ── DCF-focused Reasons ───────────────────────────────────────
+    current_price = info.get("currentPrice") or info.get("previousClose")
+    if intrinsic is not None and upside is not None and current_price:
+        reasons.append(
+            f"DCF intrinsic value ${intrinsic:.2f} vs ${current_price:.2f} market price "
+            f"— {upside:+.0%} upside with {mos:.0%} margin of safety"
+        )
+
+    if fcf_yield is not None and fcf_yield > 0:
+        reasons.append(f"Free cash flow yield {fcf_yield:.1%} — strong cash generation relative to enterprise value")
+
+    if roic_spread is not None and roic_spread > 0:
+        reasons.append(f"ROIC exceeds WACC by {roic_spread:.1%} — creating economic value above cost of capital")
+
+    if wacc is not None and roic is not None:
+        reasons.append(f"WACC {wacc:.1%}, ROIC {roic:.1%} — value creation spread of {roic_spread:.1%}" if roic_spread else f"WACC {wacc:.1%}")
+
+    # Supplementary quality context (kept brief)
+    f_score = deep.get("piotroski_f_score")
+    if f_score is not None:
+        payload["piotroski_f_score"] = f_score
+
+    altman = deep.get("altman_z_score")
+    if altman is not None:
+        payload["altman_z_score"] = altman
 
     payload["reasons"] = reasons
     payload["market_cap"] = info.get("marketCap")
-    payload["pe_ratio"] = info.get("trailingPE")
-    payload["pb_ratio"] = info.get("priceToBook")
-    payload["roe"] = info.get("returnOnEquity")
-    payload["debt_to_equity"] = info.get("debtToEquity")
-    payload["dividend_yield"] = info.get("dividendYield")
 
     return payload
 

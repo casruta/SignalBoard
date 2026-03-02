@@ -1,14 +1,13 @@
-"""Dynamic screening: Damodaran-aligned composite ranking via 9-dimension model.
+"""DCF-focused stock screener — ranks stocks purely by intrinsic value discount.
 
-Stocks are scored across 9 dimensions (Piotroski, cash flow quality, ROIC spread,
-balance sheet, DCF upside, income health, growth momentum, margin trajectory,
-blindspot) with percentile-ranked 0-1 scores and regime-adjusted weights.
+Stocks are scored across 3 DCF-derived dimensions:
+  1. Margin of Safety (40%) — DCF intrinsic value vs market price
+  2. FCF Yield (30%) — free cash flow relative to enterprise value
+  3. ROIC vs WACC Spread (30%) — economic value creation
 
-Safety filters enforce 10 hard quality gates following Damodaran's framework:
-Altman Z > 3, Piotroski >= 5, ROIC > WACC, positive FCF, non-declining revenue,
-current ratio >= 1.0, minimum trading volume, and a 15% margin-of-safety
-requirement (Damodaran: never buy at fair value — require compensation for
-estimation error in the DCF).
+Safety filters enforce hard quality gates (Altman Z > 3, Piotroski >= 5,
+ROIC > WACC, positive FCF, etc.) to ensure only fundamentally sound stocks
+are ranked by their DCF discount.
 """
 
 from __future__ import annotations
@@ -22,43 +21,17 @@ logger = logging.getLogger(__name__)
 
 
 class DynamicScreener:
-    """Adaptive screener that ranks stocks by composite quality score.
+    """DCF-focused screener that ranks stocks by intrinsic value discount.
 
-    Replaces rigid threshold filters with a scoring system that adapts
-    to market regime and evaluates stocks holistically.
+    Replaces the prior 9-dimension composite model with a pure DCF approach:
+    stocks are ranked by how undervalued they are relative to a Damodaran-aligned
+    discounted cash flow valuation.
     """
 
-    # Default component weights (sum to 1.0) — fundamentals-first, numbers-driven
     DEFAULT_WEIGHTS = {
-        "piotroski": 0.14,
-        "cash_flow_quality": 0.16,    # critical for small caps
-        "roic_spread": 0.14,          # direct value creation measure
-        "balance_sheet": 0.10,
-        "dcf_upside": 0.10,           # valuation upside
-        "income_health": 0.16,        # revenue trajectory, earnings persistence, peer-relative
-        "growth_momentum": 0.10,      # revenue + earnings growth
-        "margin_trajectory": 0.05,
-        "blindspot": 0.05,            # minor — coverage gap is noise
-    }
-
-    # Regime adjustments: multiply default weights by these factors
-    REGIME_ADJUSTMENTS = {
-        "risk_off": {
-            "balance_sheet": 1.5,
-            "cash_flow_quality": 1.3,
-            "income_health": 1.3,
-            "dcf_upside": 0.7,
-            "growth_momentum": 0.7,
-            "margin_trajectory": 0.8,
-        },
-        "risk_on": {
-            "dcf_upside": 1.4,
-            "growth_momentum": 1.5,
-            "income_health": 1.1,
-            "margin_trajectory": 1.3,
-            "balance_sheet": 0.8,
-            "blindspot": 0.8,
-        },
+        "margin_of_safety": 0.40,
+        "fcf_yield": 0.30,
+        "roic_wacc_spread": 0.30,
     }
 
     def __init__(self, top_n: int = 100):
@@ -79,9 +52,8 @@ class DynamicScreener:
 
         Steps:
         1. Apply hard safety filters (can't score your way past these)
-        2. Compute 8 component scores per stock (0-1 range, percentile-ranked)
-        3. Apply regime-adjusted weights
-        4. Sort by composite score, return top N
+        2. Compute 3 DCF component scores per stock (0-1 range, percentile-ranked)
+        3. Sort by composite score, return top N
         """
         df = self.compute_composite_scores(
             deep_fundamentals, dcf_results, info_map, macro_regime, config=config
@@ -106,12 +78,11 @@ class DynamicScreener:
         macro_regime: str = "neutral",
         config: dict | None = None,
     ) -> pd.DataFrame:
-        """Compute composite quality scores for all stocks.
+        """Compute DCF-based composite scores for all stocks.
 
         Returns DataFrame with columns:
         - ticker, composite_score, rank
-        - piotroski_score, roic_spread_score, cash_flow_score,
-          balance_sheet_score, dcf_score, growth_score, blindspot_score, margin_score
+        - dcf_upside_score, fcf_yield_score, roic_spread_score
         - passes_safety (bool)
         """
         tickers = sorted(
@@ -120,22 +91,16 @@ class DynamicScreener:
         if not tickers:
             return pd.DataFrame()
 
-        # Extract raw values for each component
+        # Extract raw DCF values for each component
         raw = self._extract_raw_values(tickers, deep_fundamentals, dcf_results, info_map)
 
         # Percentile-rank each component across the universe
         scored = pd.DataFrame({"ticker": tickers})
-        scored["piotroski_score"] = self._score_component(raw["piotroski"])
-        scored["roic_spread_score"] = self._score_component(raw["roic_spread"])
-        scored["cash_flow_score"] = self._score_component(raw["cash_flow_quality"])
-        scored["balance_sheet_score"] = self._score_component(raw["balance_sheet"])
-        scored["dcf_score"] = self._score_component(raw["dcf_upside"])
-        scored["income_health_score"] = self._score_component(raw["income_health"])
-        scored["growth_score"] = self._score_component(raw["growth_momentum"])
-        scored["blindspot_score"] = self._score_component(raw["blindspot"])
-        scored["margin_score"] = self._score_component(raw["margin_trajectory"])
+        scored["dcf_upside_score"] = self._score_component(raw["margin_of_safety"])
+        scored["fcf_yield_score"] = self._score_component(raw["fcf_yield"])
+        scored["roic_spread_score"] = self._score_component(raw["roic_wacc_spread"])
 
-        # Safety filter — now includes DCF data for ROIC/FCF gates
+        # Safety filter
         scored["passes_safety"] = [
             self._apply_safety_filters(
                 info_map.get(t, {}), deep_fundamentals.get(t, {}),
@@ -144,29 +109,20 @@ class DynamicScreener:
             for t in tickers
         ]
 
-        # Data completeness penalty — stocks with many NaN components
-        # get penalised instead of hiding behind 0.5 neutral scores.
-        # Count how many of the 9 raw components were NaN for each stock.
+        # Data completeness penalty
         scored["data_completeness"] = self._compute_data_completeness(raw, len(tickers))
 
-        # Weighted composite — use config overrides if provided
-        weights = self._get_regime_weights(macro_regime, config=config)
+        # Weighted composite
+        weights = self._get_weights(config=config)
         component_columns = {
-            "piotroski": "piotroski_score",
-            "roic_spread": "roic_spread_score",
-            "cash_flow_quality": "cash_flow_score",
-            "balance_sheet": "balance_sheet_score",
-            "dcf_upside": "dcf_score",
-            "income_health": "income_health_score",
-            "growth_momentum": "growth_score",
-            "blindspot": "blindspot_score",
-            "margin_trajectory": "margin_score",
+            "margin_of_safety": "dcf_upside_score",
+            "fcf_yield": "fcf_yield_score",
+            "roic_wacc_spread": "roic_spread_score",
         }
         raw_composite = sum(
             weights[component] * scored[col]
             for component, col in component_columns.items()
         )
-        # Apply data completeness penalty: full data = 1.0x, missing dims = discount
         scored["composite_score"] = raw_composite * scored["data_completeness"]
 
         scored["rank"] = (
@@ -288,34 +244,21 @@ class DynamicScreener:
     ) -> pd.Series:
         """Fraction of non-NaN components per stock (0-1).
 
-        9 components total.  A stock with all 9 populated gets 1.0.
-        A stock with 6/9 gets ~0.93 (mild penalty via sqrt scaling).
-        A stock with 3/9 gets ~0.82 (meaningful penalty).
+        3 components total.  A stock with all 3 populated gets 1.0.
+        Sqrt scaling so partial data is penalised but not catastrophically.
         """
         n_components = len(raw)
         non_nan_count = pd.Series(0, index=range(n_stocks), dtype=float)
         for component_values in raw.values():
             non_nan_count += (~component_values.isna()).astype(float)
-        # Sqrt scaling: not as harsh as linear, but still meaningful
         return (non_nan_count / n_components).apply(np.sqrt)
 
-    def _get_regime_weights(
-        self, macro_regime: str, config: dict | None = None
-    ) -> dict:
-        """Apply regime adjustments to default weights, then renormalize to sum=1.
-
-        If config["screening"]["weights"] exists, use those as the base weights
-        instead of DEFAULT_WEIGHTS.
-        """
+    def _get_weights(self, config: dict | None = None) -> dict:
+        """Get scoring weights from config or use defaults."""
         config_weights = (
             config.get("screening", {}).get("weights") if config else None
         )
         weights = dict(config_weights if config_weights else self.DEFAULT_WEIGHTS)
-        adjustments = self.REGIME_ADJUSTMENTS.get(macro_regime, {})
-
-        for component, factor in adjustments.items():
-            if component in weights:
-                weights[component] *= factor
 
         total = sum(weights.values())
         if total > 0:
@@ -332,81 +275,31 @@ class DynamicScreener:
         dcf_results: dict[str, dict],
         info_map: dict[str, dict],
     ) -> dict[str, pd.Series]:
-        """Extract raw numeric values for each scoring component.
+        """Extract raw numeric values for each DCF scoring component.
 
         Returns dict mapping component name to a Series indexed by position
         (aligned with *tickers* list).
         """
-        piotroski_vals = []
+        mos_vals = []
+        fcf_yield_vals = []
         roic_spread_vals = []
-        cash_flow_vals = []
-        balance_sheet_vals = []
-        dcf_upside_vals = []
-        income_health_vals = []
-        growth_vals = []
-        blindspot_vals = []
-        margin_vals = []
 
         for ticker in tickers:
-            df = deep_fundamentals.get(ticker, {})
             dcf = dcf_results.get(ticker, {})
-            info = info_map.get(ticker, {})
 
-            # Piotroski F-Score (0-9)
-            piotroski_vals.append(_safe_float(df.get("piotroski_f_score")))
+            # Margin of safety (DCF upside %)
+            mos_vals.append(_safe_float(dcf.get("dcf_upside_pct")))
+
+            # FCF yield
+            fcf_yield_vals.append(_safe_float(dcf.get("fcf_yield")))
 
             # ROIC vs WACC spread
             roic_spread_vals.append(_safe_float(dcf.get("roic_vs_wacc_spread")))
 
-            # Cash flow quality: average of inverted accruals_ratio and fcf_to_net_income
-            accruals = _safe_float(df.get("accruals_ratio"))
-            fcf_ni = _safe_float(df.get("fcf_to_net_income"))
-            inverted_accruals = -accruals if not np.isnan(accruals) else np.nan
-            cash_flow_vals.append(_nanmean([inverted_accruals, fcf_ni]))
-
-            # Balance sheet: average of altman_z and interest_coverage
-            altman = _safe_float(df.get("altman_z_score"))
-            interest_cov = _safe_float(df.get("interest_coverage"))
-            balance_sheet_vals.append(_nanmean([altman, interest_cov]))
-
-            # DCF upside
-            dcf_upside_vals.append(_safe_float(dcf.get("dcf_upside_pct")))
-
-            # Income statement health: revenue growth, consistency,
-            # earnings persistence, operating trend, and peer-relative growth
-            rev_growth = _safe_float(info.get("revenueGrowth"))
-            rev_consistency = _safe_float(df.get("revenue_growth_consistency"))
-            # Invert consistency (lower std = better) so higher is better
-            inv_consistency = -rev_consistency if not np.isnan(rev_consistency) else np.nan
-            earn_persist = _safe_float(df.get("earnings_persistence"))
-            om_trend = _safe_float(df.get("operating_margin_4q_trend"))
-            # Industry-relative revenue growth percentile (0-1, already oriented)
-            rev_industry_pctl = _safe_float(df.get("revenue_growth_industry_pctl"))
-            income_health_vals.append(
-                _nanmean([rev_growth, inv_consistency, earn_persist, om_trend, rev_industry_pctl])
-            )
-
-            # Growth momentum: blend of revenue growth and earnings growth
-            earn_growth = _safe_float(info.get("earningsGrowth"))
-            growth_vals.append(_nanmean([rev_growth, earn_growth]))
-
-            # Blindspot (institutional analysis)
-            blindspot_vals.append(_safe_float(df.get("blindspot_score")))
-
-            # Margin trajectory: average of gross and operating margin trends
-            gm_trend = _safe_float(df.get("gross_margin_4q_trend"))
-            margin_vals.append(_nanmean([gm_trend, om_trend]))
-
         return {
-            "piotroski": pd.Series(piotroski_vals),
-            "roic_spread": pd.Series(roic_spread_vals),
-            "cash_flow_quality": pd.Series(cash_flow_vals),
-            "balance_sheet": pd.Series(balance_sheet_vals),
-            "dcf_upside": pd.Series(dcf_upside_vals),
-            "income_health": pd.Series(income_health_vals),
-            "growth_momentum": pd.Series(growth_vals),
-            "blindspot": pd.Series(blindspot_vals),
-            "margin_trajectory": pd.Series(margin_vals),
+            "margin_of_safety": pd.Series(mos_vals),
+            "fcf_yield": pd.Series(fcf_yield_vals),
+            "roic_wacc_spread": pd.Series(roic_spread_vals),
         }
 
 
