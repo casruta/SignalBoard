@@ -258,6 +258,32 @@
             text: "The percentage of shares outstanding that have been sold short and not yet covered. Represents bearish bets against the stock.",
             why: "Elevated short interest (>10%) may indicate negative sentiment, but it can also fuel short squeezes if the stock rises."
         },
+        rsi_14: {
+            title: "RSI(14)",
+            text: "Relative Strength Index over 14 periods. A momentum oscillator measuring the speed and magnitude of recent price changes on a 0\u2013100 scale.",
+            why: "Above 70 signals overbought conditions (potential pullback). Below 30 signals oversold (potential bounce). For long-term value investors, an oversold RSI on a fundamentally sound stock can be an attractive entry point."
+        },
+        // Capital Efficiency
+        r_d_intensity: {
+            title: "R&D Intensity",
+            text: "Research & Development expenditure as a percentage of revenue. Measures how much of each revenue dollar is reinvested into innovation and product development.",
+            why: "High R&D intensity (>10%) is typical for tech and pharma. It suggests a commitment to future growth, but must be evaluated against actual revenue growth to assess ROI."
+        },
+        capex_intensity: {
+            title: "CapEx Intensity",
+            text: "Capital Expenditures as a percentage of revenue. Measures how much of each revenue dollar is spent on maintaining and expanding physical assets.",
+            why: "Capital-light businesses (low CapEx intensity) generate more free cash flow per dollar of revenue. High CapEx intensity is typical for utilities and energy."
+        },
+        r_d_capex: {
+            title: "R&D / CapEx",
+            text: "The ratio of R&D spending to Capital Expenditures. Indicates whether the company invests more in innovation (R&D) or physical assets (CapEx).",
+            why: "A ratio above 2x suggests an innovation-driven business model. Below 0.5x indicates asset-heavy operations. Useful for comparing capital allocation strategies."
+        },
+        r_d_roi_proxy: {
+            title: "R&D ROI Proxy",
+            text: "Revenue growth rate divided by R&D intensity. A rough measure of how much growth each point of R&D spending generates.",
+            why: "Higher values suggest efficient R&D spending that translates into revenue growth. Negative or very low values may indicate R&D that is not yielding commercial results."
+        },
         // Price Target
         dcf: {
             title: "DCF Weight",
@@ -506,6 +532,7 @@
                 { id: "balance", title: "Balance Sheet", html: renderBalanceSheet(data.balance_sheet) },
                 { id: "capital", title: "Capital Structure", html: renderCapitalStructure(data.capital_structure) },
                 { id: "profitability", title: "Profitability & Efficiency", html: renderProfitability(data.profitability) },
+                { id: "capeff", title: "Capital Efficiency", html: renderCapitalEfficiency(data.capital_efficiency) },
                 { id: "risks", title: "Risk Factors", html: renderRisks(data.risks) },
                 { id: "pricetarget", title: "Price Target Derivation", html: renderPriceTarget(data.price_target) },
                 { id: "verdict", title: "Verdict", html: renderVerdict(data.verdict, data.header) }
@@ -667,6 +694,31 @@
                 html += '<div class="snapshot-item"><span class="snapshot-label' + (he ? ' explainable' : '') + '"' + (he ? ' data-explain="' + ek + '"' : '') + '>' + items[i].label + '</span><span class="snapshot-value">' + items[i].value + '</span></div>';
             }
             html += '</div>';
+
+            // RSI(14) gauge
+            if (s.rsi_14 != null) {
+                var rsiVal = s.rsi_14;
+                var rsiPct = Math.max(0, Math.min(100, rsiVal));
+                var rsiStatus = rsiVal < 30 ? "Oversold" : rsiVal > 70 ? "Overbought" : "Neutral";
+                var rsiStatusClass = rsiVal < 30 ? "oversold" : rsiVal > 70 ? "overbought" : "neutral";
+                html += '<div class="rsi-gauge">';
+                html += '<div class="rsi-header">';
+                html += '<span class="rsi-title explainable" data-explain="rsi_14">RSI(14)</span>';
+                html += '<span class="rsi-value">' + rsiVal.toFixed(1) + '</span>';
+                html += '<span class="rsi-status ' + rsiStatusClass + '">' + rsiStatus + '</span>';
+                html += '</div>';
+                html += '<div class="rsi-track">';
+                html += '<div class="rsi-zone rsi-oversold" style="width:30%"></div>';
+                html += '<div class="rsi-zone rsi-neutral" style="width:40%"></div>';
+                html += '<div class="rsi-zone rsi-overbought" style="width:30%"></div>';
+                html += '<div class="rsi-indicator" style="left:' + rsiPct + '%"></div>';
+                html += '</div>';
+                html += '<div class="rsi-labels">';
+                html += '<span>0</span><span>30</span><span>70</span><span>100</span>';
+                html += '</div>';
+                html += '</div>';
+            }
+
             return html;
         }
 
@@ -852,6 +904,30 @@
                 { label: "DSO", value: p.dso != null ? Math.round(p.dso) + " days" : "\u2014" },
                 { label: "DPO", value: p.dpo != null ? Math.round(p.dpo) + " days" : "\u2014" },
                 { label: "Cash Conversion Cycle", value: p.cash_conversion_cycle != null ? Math.round(p.cash_conversion_cycle) + " days" : "\u2014" }
+            ];
+            var html = '<div class="snapshot-grid">';
+            for (var i = 0; i < items.length; i++) {
+                var ek = items[i].label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+                var he = ek && typeof EXPLANATIONS !== "undefined" && EXPLANATIONS[ek];
+                html += '<div class="snapshot-item"><span class="snapshot-label' + (he ? ' explainable' : '') + '"' + (he ? ' data-explain="' + ek + '"' : '') + '>' + items[i].label + '</span><span class="snapshot-value">' + items[i].value + '</span></div>';
+            }
+            html += '</div>';
+            return html;
+        }
+
+        function renderCapitalEfficiency(ce) {
+            if (!ce) return "";
+            var fmtM = function(v) {
+                if (v == null) return "\u2014";
+                return Math.abs(v) >= 1e9 ? "$" + (v/1e9).toFixed(1) + "B" : "$" + Math.round(v/1e6) + "M";
+            };
+            var items = [
+                { label: "R&D Intensity", value: fmtPctReport(ce.rd_intensity) },
+                { label: "CapEx Intensity", value: fmtPctReport(ce.capex_intensity) },
+                { label: "R&D / CapEx", value: ce.rd_to_capex != null ? ce.rd_to_capex.toFixed(1) + "x" : "\u2014" },
+                { label: "R&D ROI Proxy", value: ce.rd_roi_proxy != null ? ce.rd_roi_proxy.toFixed(1) + "x" : "\u2014" },
+                { label: "R&D Expense", value: fmtM(ce.rd_expense) },
+                { label: "CapEx", value: fmtM(ce.capex) }
             ];
             var html = '<div class="snapshot-grid">';
             for (var i = 0; i < items.length; i++) {

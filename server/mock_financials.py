@@ -72,6 +72,7 @@ class _Anchors:
     buyback_yield: Optional[float] = None; fcf_conversion: Optional[float] = None
     dilution_pct: Optional[float] = None
     dividend_yield: Optional[float] = None; payout_ratio: Optional[float] = None
+    rsi: Optional[float] = None
 
 
 def _dollar_val(m) -> float:
@@ -131,6 +132,10 @@ def _parse_anchors(signal: dict) -> _Anchors:
     if v: a.dividend_yield = float(v)/100
     v = _s(r'payout\s*ratio\s*(\d+(?:\.\d+)?)%')
     if v: a.payout_ratio = float(v)/100
+    # RSI — search technical points (not in blob which is fundamental+macro only)
+    tech_blob = " ".join(signal.get("technical", {}).get("points", []))
+    rm = re.search(r'RSI\s*(?:at\s*)?(\d+(?:\.\d+)?)', tech_blob, re.I)
+    if rm: a.rsi = float(rm.group(1))
     return a
 
 
@@ -504,6 +509,43 @@ def _build_roi(signal: dict, anchors: _Anchors, p: dict, price: float) -> dict:
     return roi
 
 
+def _default_rsi(action: str, confidence: float) -> float:
+    """Generate a plausible RSI(14) value based on action and confidence."""
+    if action == "BUY":
+        # Value stocks being recommended: RSI typically 35-55
+        return round(35 + (1 - confidence) * 20 + random.uniform(-5, 5), 1)
+    elif action == "SELL":
+        # Overbought stocks being sold: RSI typically 60-80
+        return round(60 + confidence * 20 + random.uniform(-5, 5), 1)
+    else:
+        return round(45 + random.uniform(-10, 10), 1)
+
+
+def _build_capital_efficiency(isd: list[dict], cfd: list[dict], p: dict) -> dict:
+    """Build capital efficiency metrics from income statement and cash flow data."""
+    latest_is = isd[-1]
+    latest_cf = cfd[-1]
+    rev = latest_is["revenue"]
+    rd = latest_is["rd_expense"]
+    capex_abs = abs(latest_cf["capex"]) if latest_cf["capex"] else 0
+
+    rd_intensity = round(rd / rev, 4) if rev else 0
+    capex_intensity = round(capex_abs / rev, 4) if rev else 0
+    rd_to_capex = round(rd / capex_abs, 2) if capex_abs else 0
+    rg = latest_is.get("yoy_growth", p["rg"])
+    rd_roi = round(rg / rd_intensity, 2) if rd_intensity else 0
+
+    return {
+        "rd_intensity": rd_intensity,
+        "capex_intensity": capex_intensity,
+        "rd_to_capex": rd_to_capex,
+        "rd_roi_proxy": rd_roi,
+        "rd_expense": round(rd, 0),
+        "capex": round(capex_abs, 0),
+        "revenue": round(rev, 0),
+    }
+
+
 def generate_mock_report(signal: dict) -> dict:
     """Generate a comprehensive, internally-consistent mock equity research report."""
     random.seed(hash(signal["ticker"]))
@@ -573,7 +615,8 @@ def generate_mock_report(signal: dict) -> dict:
         "range_52w_high":round(price*random.uniform(1.10,1.40),2),
         "avg_volume_3m":round(sh*random.uniform(.008,.02),0),
         "dividend_yield":round(p["div"],4),"beta":round(p["beta"],2),
-        "short_interest_pct":round(anc.short_interest or random.uniform(.02,.06),4)}
+        "short_interest_pct":round(anc.short_interest or random.uniform(.02,.06),4),
+        "rsi_14":round(anc.rsi or _default_rsi(act, conf), 1)}
     iv_prices = [iv["implied_price"] for iv in comps["implied_valuation"] if iv["implied_price"] > 0]
     iv_avg = sum(iv_prices)/len(iv_prices) if iv_prices else ca
     iv_gap = round((iv_avg/price - 1)*100, 1) if price else 0
@@ -585,6 +628,7 @@ def generate_mock_report(signal: dict) -> dict:
     _comp_sec = _build_compensation(signal)
     _roi = _build_roi(signal, anc, p, price)
     _scoring = _build_scoring_breakdown(signal)
+    _capeff = _build_capital_efficiency(isd, cfd, p)
     summaries = {
         "thesis": f"{rat}. {up:+.1%} upside to ${bl:.2f}. EV/Rev {p['ev_rev']:.1f}x vs {comps['peer_median']['ev_revenue']:.1f}x peer median.",
         "snapshot": f"{_fmt_m(mc)} cap, {p['beta']:.2f} beta, {snap['short_interest_pct']:.1%} SI. 52w range ${snap['range_52w_low']:.0f}\u2013${snap['range_52w_high']:.0f}.",
@@ -607,6 +651,7 @@ def generate_mock_report(signal: dict) -> dict:
         "compensation": _comp_sec.get("alignment_note") if _comp_sec.get("has_data") else "Compensation data unavailable",
         "roi": f"Total ROI {_roi['total_roi_pct']:.1%} ({_roi['capital_gain_pct']:.1%} capital + {_roi['income_return_pct']:.1%} income). Risk-adjusted: {_roi['risk_adjusted_roi']:.1%}." if _roi.get("total_roi_pct") is not None else None,
         "scoring": f"Composite {_scoring['composite_total']:.3f}, rank #{_scoring['rank']}. Top driver: {_scoring['components'][0]['label']} ({_scoring['components'][0]['contribution']:.3f})." if _scoring.get("has_data") and _scoring.get("components") else None,
+        "capeff": f"R&D intensity {_capeff['rd_intensity']:.1%}, CapEx intensity {_capeff['capex_intensity']:.1%}. R&D/CapEx {_capeff['rd_to_capex']:.1f}x.",
     }
     return {
         "header":{"ticker":signal["ticker"],"name":signal.get("short_name",""),"sector":sec,
@@ -635,6 +680,7 @@ def generate_mock_report(signal: dict) -> dict:
             "blended":round(bl,2)},
         "verdict":{"rating":rat,"price_target":round(bl,2),"confidence":round(conf,4),
             "summary":f"{rat} with {bl:.2f} price target ({up:+.1%} upside). {signal.get('ml_insight','')}"},
+        "capital_efficiency": _capeff,
         "ddm": _ddm,
         "ceo_info": _ceo,
         "compensation": _comp_sec,
