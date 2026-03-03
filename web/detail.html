@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SignalBoard</title>
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/styles.css?v=10">
+<link rel="stylesheet" href="/static/styles.css?v=13">
 </head>
 <body data-page="detail">
   <div class="detail-topbar">
@@ -22,8 +22,16 @@
         <div class="loading"></div>
       </div>
     </div>
+    <aside id="explain-panel" class="explain-panel">
+      <div class="explain-panel-inner">
+        <button class="explain-close" id="explain-close">&times;</button>
+        <h4 class="explain-term" id="explain-term"></h4>
+        <p class="explain-text" id="explain-text"></p>
+        <p class="explain-why" id="explain-why"></p>
+      </div>
+    </aside>
   </div>
 
-  <script src="/static/app.js?v=11"></script>
+  <script src="/static/app.js?v=13"></script>
 </body>
 </html>

@@ -635,7 +635,7 @@ body[data-page="detail"] {
 .report-layout {
   display: flex;
   align-items: flex-start;
-  max-width: 1058px;
+  max-width: 1320px;
   margin: 0 auto;
 }
 
@@ -1389,6 +1389,102 @@ body[data-page="detail"] {
   background: rgba(212, 208, 200, 0.08);
 }
 
+/* ── Explainable terms ───────────────────────────────────── */
+
+td.explainable {
+  cursor: pointer;
+  border-bottom: 1px dashed rgba(26, 26, 26, 0.25);
+  transition: background 0.15s, color 0.15s;
+}
+
+td.explainable:hover {
+  background: rgba(26, 26, 26, 0.04);
+  color: var(--fg);
+}
+
+td.explainable.active {
+  background: rgba(26, 26, 26, 0.06);
+  border-bottom-color: var(--fg);
+}
+
+/* ── Explanation panel (right rail) ──────────────────────── */
+
+.explain-panel {
+  width: 260px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 49px;
+  align-self: flex-start;
+  max-height: calc(100vh - 49px);
+  overflow-y: auto;
+  scrollbar-width: none;
+  opacity: 0;
+  transform: translateX(12px);
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+.explain-panel::-webkit-scrollbar {
+  display: none;
+}
+
+.explain-panel.open {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+.explain-panel-inner {
+  padding: 20px 16px;
+  margin-top: 12px;
+  border-left: 1px solid var(--rule);
+}
+
+.explain-close {
+  float: right;
+  background: none;
+  border: none;
+  font-size: 1.1rem;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  transition: color 0.15s;
+}
+
+.explain-close:hover {
+  color: var(--fg);
+}
+
+.explain-term {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  color: var(--fg);
+  margin: 0 0 12px 0;
+  padding-right: 20px;
+}
+
+.explain-text {
+  font-family: 'EB Garamond', serif;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: var(--fg);
+  margin: 0 0 14px 0;
+}
+
+.explain-why {
+  font-family: 'EB Garamond', serif;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 0;
+  padding-top: 10px;
+  border-top: 1px solid rgba(212, 208, 200, 0.4);
+  font-style: italic;
+}
+
 /* ── Report mobile overrides ─────────────────────────────── */
 
 @media (max-width: 768px) {
@@ -1405,5 +1501,28 @@ body[data-page="detail"] {
   .report-container {
     max-width: 100%;
     padding: 16px 14px 60px;
+  }
+  .explain-panel {
+    display: none;
+  }
+  .explain-panel.open {
+    display: block;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    top: auto;
+    width: 100%;
+    max-height: 50vh;
+    z-index: 200;
+    background: var(--bg);
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.08);
+    transform: none;
+    border-radius: 12px 12px 0 0;
+  }
+  .explain-panel.open .explain-panel-inner {
+    border-left: none;
+    margin-top: 0;
+    padding: 16px 20px 24px;
   }
 }
