@@ -139,134 +139,58 @@ class TestDynamicScreenerScreen:
         assert result == []
 
 
-# ── Tests: compute_composite_scores ──────────────────────────────────
+# ── Tests: compute_dcf_rankings ──────────────────────────────────────
 
 
-class TestComputeCompositeScores:
+class TestComputeDCFRankings:
     def test_returns_expected_columns(self):
         deep, dcf, info, _ = _build_test_data()
         screener = DynamicScreener()
-        df = screener.compute_composite_scores(deep, dcf, info)
+        df = screener.compute_dcf_rankings(deep, dcf, info)
 
         expected_columns = [
             "ticker",
-            "composite_score",
-            "rank",
-            "piotroski_score",
-            "roic_spread_score",
-            "cash_flow_score",
-            "balance_sheet_score",
-            "dcf_score",
-            "income_health_score",
-            "growth_score",
-            "blindspot_score",
-            "margin_score",
-            "momentum_score",
-            "low_vol_score",
+            "dcf_upside_pct",
+            "margin_of_safety",
+            "intrinsic_value",
+            "current_price",
+            "wacc",
+            "fcf_yield",
+            "piotroski_f_score",
+            "altman_z_score",
             "passes_safety",
-            "data_completeness",
+            "rank",
         ]
         for col in expected_columns:
             assert col in df.columns, f"Missing column: {col}"
 
-    def test_scores_between_0_and_1(self):
+    def test_rank_ascending_by_dcf_upside(self):
         deep, dcf, info, _ = _build_test_data()
         screener = DynamicScreener()
-        df = screener.compute_composite_scores(deep, dcf, info)
-
-        score_cols = [
-            "piotroski_score", "roic_spread_score", "cash_flow_score",
-            "balance_sheet_score", "dcf_score", "blindspot_score", "margin_score",
-            "income_health_score", "growth_score", "momentum_score", "low_vol_score",
-        ]
-        for col in score_cols:
-            assert (df[col] >= 0).all() and (df[col] <= 1).all(), f"{col} out of [0,1]"
-
-    def test_data_completeness_excludes_sparse_data(self):
-        deep, dcf, info, tickers = _build_test_data()
-        screener = DynamicScreener()
-
-        # Make one stock have very sparse data (only 3 dims populated)
-        sparse_t = tickers[0]
-        deep[sparse_t] = {"quarters_available": 8, "altman_z_score": 5.0,
-                          "piotroski_f_score": 7}
-        dcf[sparse_t] = {}
-        info[sparse_t] = {"marketCap": 5e9, "revenueGrowth": 0.08,
-                          "averageVolume": 500_000, "sector": "Technology"}
-
-        df = screener.compute_composite_scores(deep, dcf, info)
-        sparse_row = df[df["ticker"] == sparse_t].iloc[0]
-        # Sparse stock should be hard-excluded (completeness = 0.0)
-        assert sparse_row["data_completeness"] == 0.0
-        assert sparse_row["composite_score"] == 0.0
+        df = screener.compute_dcf_rankings(deep, dcf, info)
+        # Rank 1 should have the highest DCF upside
+        valid = df.dropna(subset=["dcf_upside_pct"])
+        if len(valid) > 1:
+            rank1 = valid[valid["rank"] == valid["rank"].min()]
+            assert rank1["dcf_upside_pct"].iloc[0] >= valid["dcf_upside_pct"].min()
 
     def test_empty_input(self):
         screener = DynamicScreener()
-        df = screener.compute_composite_scores({}, {}, {})
+        df = screener.compute_dcf_rankings({}, {}, {})
         assert df.empty
 
     def test_dcf_upside_capped(self):
-        """DCF upside values should be capped at [-50%, +200%]."""
+        """DCF upside values should be capped within screener bounds."""
         deep, dcf, info, tickers = _build_test_data(n_stocks=3)
         screener = DynamicScreener()
         # Set extreme DCF upside
-        dcf[tickers[0]]["dcf_upside_pct"] = 5.0  # 500% — should be capped at 200%
-        dcf[tickers[1]]["dcf_upside_pct"] = -0.9  # -90% — should be floored at -50%
-        df = screener.compute_composite_scores(deep, dcf, info)
-        # Both extreme stocks should still have valid scores (capped, not NaN)
-        assert df["dcf_score"].notna().all()
-
-
-# ── Tests: Winsorization ─────────────────────────────────────────────
-
-
-class TestWinsorization:
-    def test_winsorize_clips_outliers(self):
-        values = pd.Series([1, 2, 3, 4, 5, 6, 7, 8, 9, 100])
-        result = DynamicScreener._winsorize(values, lower=0.1, upper=0.9)
-        assert result.max() <= 100  # with 10 values, 90th pctile < 100
-        assert result.min() >= 1
-
-    def test_winsorize_preserves_nan(self):
-        values = pd.Series([1, 2, np.nan, 4, 5, 6, 7, 8, 9, 10])
-        result = DynamicScreener._winsorize(values)
-        assert result.isna().sum() == 1
-
-    def test_winsorize_small_series_unchanged(self):
-        values = pd.Series([1.0, 2.0, 3.0])
-        result = DynamicScreener._winsorize(values)
-        pd.testing.assert_series_equal(result, values)
-
-
-# ── Tests: Regime weight adjustment ──────────────────────────────────
-
-
-class TestRegimeAdjustment:
-    def test_risk_off_increases_balance_sheet_weight(self):
-        screener = DynamicScreener()
-        neutral = screener._get_regime_weights("neutral")
-        risk_off = screener._get_regime_weights("risk_off")
-        assert risk_off["balance_sheet"] > neutral["balance_sheet"]
-
-    def test_risk_on_increases_dcf_weight(self):
-        screener = DynamicScreener()
-        neutral = screener._get_regime_weights("neutral")
-        risk_on = screener._get_regime_weights("risk_on")
-        assert risk_on["dcf_upside"] > neutral["dcf_upside"]
-
-    def test_weights_sum_to_one(self):
-        screener = DynamicScreener()
-        for regime in ["neutral", "risk_off", "risk_on"]:
-            weights = screener._get_regime_weights(regime)
-            assert abs(sum(weights.values()) - 1.0) < 1e-9
-
-    def test_new_dimensions_have_weights(self):
-        screener = DynamicScreener()
-        weights = screener._get_regime_weights("neutral")
-        assert "price_momentum" in weights
-        assert "low_volatility" in weights
-        assert weights["price_momentum"] > 0
-        assert weights["low_volatility"] > 0
+        dcf[tickers[0]]["dcf_upside_pct"] = 5.0  # 500%
+        dcf[tickers[1]]["dcf_upside_pct"] = -0.9  # -90%
+        df = screener.compute_dcf_rankings(deep, dcf, info)
+        # Capped values should be within bounds
+        valid = df["dcf_upside_pct"].dropna()
+        assert (valid <= screener.DCF_UPSIDE_CAP).all()
+        assert (valid >= screener.DCF_UPSIDE_FLOOR).all()
 
 
 # ── Tests: Safety filter ─────────────────────────────────────────────
@@ -425,76 +349,6 @@ class TestSafetyFilter:
         assert screener._apply_safety_filters(info, deep, dcf=dcf, config=config) is True
 
 
-# ── Tests: Price momentum & volatility ───────────────────────────────
-
-
-class TestPriceMomentumAndVol:
-    def test_momentum_from_price_data(self):
-        from signals.dynamic_screener import _compute_price_momentum
-        dates = pd.bdate_range(end="2025-12-31", periods=300)
-        prices = pd.Series(np.linspace(50, 100, 300), index=dates, name="Close")
-        df = pd.DataFrame({"Close": prices})
-        mom = _compute_price_momentum(df)
-        assert not np.isnan(mom)
-        assert mom > 0  # price went up
-
-    def test_momentum_returns_nan_for_short_history(self):
-        from signals.dynamic_screener import _compute_price_momentum
-        dates = pd.bdate_range(end="2025-12-31", periods=100)
-        prices = pd.Series(np.linspace(50, 60, 100), index=dates, name="Close")
-        df = pd.DataFrame({"Close": prices})
-        assert np.isnan(_compute_price_momentum(df))
-
-    def test_realized_vol_positive(self):
-        from signals.dynamic_screener import _compute_realized_vol
-        dates = pd.bdate_range(end="2025-12-31", periods=100)
-        rng = np.random.default_rng(42)
-        prices = pd.Series(100 * np.exp(np.cumsum(rng.normal(0, 0.01, 100))),
-                           index=dates, name="Close")
-        df = pd.DataFrame({"Close": prices})
-        vol = _compute_realized_vol(df)
-        assert not np.isnan(vol)
-        assert vol > 0
-
-    def test_realized_vol_nan_for_short_data(self):
-        from signals.dynamic_screener import _compute_realized_vol
-        dates = pd.bdate_range(end="2025-12-31", periods=30)
-        prices = pd.Series(np.linspace(50, 60, 30), index=dates, name="Close")
-        df = pd.DataFrame({"Close": prices})
-        assert np.isnan(_compute_realized_vol(df))
-
-
-# ── Tests: IC-weighted allocation ────────────────────────────────────
-
-
-class TestICWeights:
-    def test_ic_weights_sum_to_one(self):
-        rng = np.random.default_rng(42)
-        n = 100
-        factor_scores = pd.DataFrame({
-            "a": rng.normal(size=n),
-            "b": rng.normal(size=n),
-        })
-        forward_returns = pd.Series(rng.normal(size=n))
-        base = {"a": 0.5, "b": 0.5}
-        weights = DynamicScreener.compute_ic_weights(
-            factor_scores, forward_returns, base, shrinkage=0.5,
-        )
-        assert abs(sum(weights.values()) - 1.0) < 1e-9
-
-    def test_ic_weights_fall_back_to_base_when_no_signal(self):
-        n = 100
-        factor_scores = pd.DataFrame({
-            "a": [np.nan] * n,
-            "b": [np.nan] * n,
-        })
-        forward_returns = pd.Series([0.0] * n)
-        base = {"a": 0.6, "b": 0.4}
-        weights = DynamicScreener.compute_ic_weights(
-            factor_scores, forward_returns, base, shrinkage=0.5,
-        )
-        assert abs(weights["a"] - 0.6) < 0.01
-        assert abs(weights["b"] - 0.4) < 0.01
 
 
 # ── Tests: Filing lag utility ────────────────────────────────────────

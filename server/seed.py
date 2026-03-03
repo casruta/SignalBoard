@@ -235,13 +235,23 @@ def seed_live(db_path: str, config: dict) -> None:
     except Exception:
         pass
 
-    screener = DynamicScreener(top_n=config.get("screening", {}).get("top_n", 50))
-    scores_df = screener.compute_composite_scores(
-        deep_fund_map, dcf_map, info_map, macro_regime, config=config
+    top_n = config.get("screening", {}).get("top_n", 50)
+    screener = DynamicScreener(top_n=top_n)
+    scores_df = screener.compute_dcf_rankings(
+        deep_fund_map, dcf_map, info_map, config=config
     )
 
-    # ── Select top 3 growth stocks ─────────────────────────────────
-    safe_df = scores_df[scores_df["passes_safety"]].head(3)
+    if scores_df.empty:
+        logger.warning("Screener returned no results")
+        return
+
+    # ── Select top stocks passing safety filters ──────────────────
+    safe_df = scores_df[scores_df["passes_safety"]].copy()
+    if safe_df.empty:
+        safe_df = scores_df.head(top_n)
+    safe_df = safe_df.sort_values("dcf_upside_pct", ascending=False, na_position="last").head(top_n)
+    safe_df = safe_df.reset_index(drop=True)
+    safe_df["rank"] = safe_df.index + 1
     logger.info("Found %d stocks passing safety filters", len(safe_df))
 
     # Sanitize NaN/Inf for JSON compat
@@ -311,33 +321,15 @@ def seed_live(db_path: str, config: dict) -> None:
             logger.warning("Verification failed for %s", ticker, exc_info=True)
             verification = {"all_passed": None, "summary": "Verification unavailable"}
 
-        # ── Scoring breakdown (per-component transparency) ──
-        weights = screener._get_regime_weights(macro_regime, config=config)
-        component_map = {
-            "piotroski": ("Piotroski F-Score", "piotroski_score"),
-            "cash_flow_quality": ("Cash Flow Quality", "cash_flow_score"),
-            "roic_spread": ("ROIC vs WACC", "roic_spread_score"),
-            "balance_sheet": ("Balance Sheet", "balance_sheet_score"),
-            "dcf_upside": ("DCF Upside", "dcf_score"),
-            "income_health": ("Income Health", "income_health_score"),
-            "growth_momentum": ("Growth Momentum", "growth_score"),
-            "margin_trajectory": ("Margin Trajectory", "margin_score"),
-            "blindspot": ("Blindspot", "blindspot_score"),
-            "price_momentum": ("Price Momentum", "momentum_score"),
-            "low_volatility": ("Low Volatility", "low_vol_score"),
+        # ── Scoring breakdown (DCF-centric) ──
+        scoring_breakdown = {
+            "rank": int(row.get("rank", 0)),
+            "dcf_upside_pct": dcf.get("dcf_upside_pct"),
+            "margin_of_safety": dcf.get("margin_of_safety"),
+            "piotroski_f_score": deep.get("piotroski_f_score"),
+            "roic_vs_wacc_spread": dcf.get("roic_vs_wacc_spread"),
+            "altman_z_score": deep.get("altman_z_score"),
         }
-        scoring_breakdown = {}
-        for comp_key, (label, col) in component_map.items():
-            score = float(row.get(col, 0.5))
-            weight = weights.get(comp_key, 0)
-            scoring_breakdown[comp_key] = {
-                "label": label,
-                "score": round(score, 3),
-                "weight": round(weight, 3),
-                "contribution": round(score * weight, 4),
-            }
-        scoring_breakdown["composite_total"] = round(float(row.get("composite_score", 0)), 4)
-        scoring_breakdown["rank"] = int(row.get("rank", 0))
 
         # Attach per-dimension calculation details from screener
         calc_details = row.get("calculation_details")
@@ -393,24 +385,19 @@ def seed_live(db_path: str, config: dict) -> None:
             "sector": info.get("sector", ""),
             "industry": info.get("industry", ""),
             "market_cap": info.get("marketCap"),
-            "composite_score": row.get("composite_score"),
+            "dcf_upside_pct": dcf.get("dcf_upside_pct"),
+            "margin_of_safety": dcf.get("margin_of_safety"),
+            "intrinsic_value": dcf.get("intrinsic_value_per_share"),
+            "current_price": current_price,
+            "wacc": dcf.get("wacc"),
+            "fcf_yield": dcf.get("fcf_yield"),
             "rank": int(row.get("rank", 0)),
-            "stock_category": "growth",
-            "piotroski_score": row.get("piotroski_score"),
-            "roic_spread_score": row.get("roic_spread_score"),
-            "cash_flow_score": row.get("cash_flow_score"),
-            "balance_sheet_score": row.get("balance_sheet_score"),
-            "dcf_score": row.get("dcf_score"),
-            "income_health_score": row.get("income_health_score"),
-            "growth_score": row.get("growth_score"),
-            "blindspot_score": row.get("blindspot_score"),
-            "margin_score": row.get("margin_score"),
             "analysis": analysis,
         })
 
         # ── Build recommendation signal for rich report generation ──
-        composite = row.get("composite_score", 50)
-        confidence = round(min(0.60 + composite * 0.35, 0.95), 2)
+        dcf_upside_raw = dcf.get("dcf_upside_pct") or 0
+        confidence = round(min(0.60 + abs(dcf_upside_raw) * 0.5, 0.95), 2)
         take_profit = round(target, 2) if target else None
         stop_loss = round(current_price * 0.92, 2) if current_price else None
         dcf_up = dcf.get("dcf_upside_pct")
@@ -535,7 +522,7 @@ def seed_live(db_path: str, config: dict) -> None:
 
         # ── Technical points (richer context) ──
         tech_points = [
-            f"Composite quality score ranks #{int(row.get('rank', 0))} in screened universe of {len(scores_df)} stocks",
+            f"DCF ranking #{int(row.get('rank', 0))} in screened universe of {len(safe_df)} stocks",
             "Multi-factor quality signal active across profitability, cash flow, and balance sheet dimensions",
         ]
         if dcf_up is not None and dcf_up > 0:
@@ -597,7 +584,7 @@ def seed_live(db_path: str, config: dict) -> None:
         hist_text = f"{ticker} screened via dynamic composite model"
         if info.get("shortName"):
             hist_text = f"{info['shortName']} ({ticker}) screened via dynamic composite model"
-        hist_text += f" with composite score {composite:.1f}. "
+        hist_text += f" with {dcf_upside_raw:.0%} DCF upside. "
         if pf is not None and pf >= 6:
             hist_text += f"Piotroski {int(pf)}+ with quality momentum has historically correlated with 2-3% median forward returns over 10 days. "
         if roic_spread is not None and roic_spread > 0.05:
