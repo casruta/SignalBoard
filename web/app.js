@@ -636,7 +636,7 @@
             // Key metrics row
             html += '<div class="price-target-row">';
             html += '<div class="pt-item"><span class="pt-label">Target</span><span class="pt-value">' + fmtUSD(h.price_target) + '</span></div>';
-            html += '<div class="pt-item"><span class="pt-label">Upside</span><span class="pt-value ' + upsideClass + '">' + fmtPctReport(h.upside_pct) + '</span></div>';
+            html += '<div class="pt-item"><span class="pt-label">Upside</span><span class="pt-value ' + upsideClass + '">' + fmtPctSigned(h.upside_pct) + '</span></div>';
             html += '<div class="pt-item"><span class="pt-label">Date</span><span class="pt-value" style="font-size:0.8rem">' + escapeHtml(h.date || '') + '</span></div>';
             html += '</div>';
             html += '</div>';
@@ -709,7 +709,6 @@
             if (typeof val === "number") {
                 if (Math.abs(val) >= 1e9) return fmtB(val);
                 if (Math.abs(val) >= 1e6) return fmtM(val);
-                if (Math.abs(val) < 1 && val !== 0) return fmtPctReport(val);
                 return fmtNum(val);
             }
             return escapeHtml(String(val));
@@ -794,7 +793,7 @@
                     { label: "PV of Terminal Value", values: [o.pv_terminal], format: "millions" },
                     { label: "Implied Enterprise Value", values: [o.implied_ev], type: "subtotal", format: "millions" },
                     { label: "Implied Price / Share", values: [o.implied_price], type: "header", format: "usd" },
-                    { label: "Upside / (Downside)", values: [o.upside_pct], type: "pct", format: "pct" }
+                    { label: "Upside / (Downside)", values: [o.upside_pct != null ? fmtPctSigned(o.upside_pct) : null], type: "pct" }
                 ];
                 html += '<div class="dcf-sub-table">';
                 html += renderFinTable("Valuation Output", "dcf-output", ["Value"], oRows);
@@ -928,7 +927,7 @@
             if (header && header.upside_pct != null) {
                 var upsideVal = header.upside_pct;
                 var upsideCls = upsideVal >= 0 ? "positive" : "negative";
-                html += '<div class="verdict-upside ' + upsideCls + '" style="font-size:1.8rem;font-weight:700;margin:8px 0">' + fmtPctReport(upsideVal) + ' upside</div>';
+                html += '<div class="verdict-upside ' + upsideCls + '" style="font-size:1.8rem;font-weight:700;margin:8px 0">' + fmtPctSigned(upsideVal) + ' upside</div>';
             }
             html += '<div class="verdict-target">Price Target: ' + fmtUSD(v.price_target) + '</div>';
             if (v.confidence != null) {
@@ -958,8 +957,14 @@
             if (n == null) return "\u2014";
             if (typeof n === "string") return escapeHtml(n);
             if (isNaN(n)) return "\u2014";
-            var pct = (Math.abs(n) <= 1 && n !== 0) ? n * 100 : n;
-            return pct.toFixed(1) + "%";
+            return (n * 100).toFixed(1) + "%";
+        }
+
+        function fmtPctSigned(n) {
+            if (n == null) return "\u2014";
+            if (typeof n === "string") return escapeHtml(n);
+            if (isNaN(n)) return "\u2014";
+            return (n >= 0 ? "+" : "") + (n * 100).toFixed(1) + "%";
         }
 
         function fmtX(n) {
