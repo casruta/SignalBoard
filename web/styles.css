@@ -56,6 +56,68 @@ body[data-page="list"] {
   border-color: var(--fg);
 }
 
+/* ── Ticker Lookup ──────────────────────────────────── */
+
+.lookup-bar {
+  width: min(90vw, 480px);
+  margin-bottom: 2rem;
+  opacity: 0;
+  animation: fadeIn 1s ease forwards 0.3s;
+}
+
+.lookup-bar form {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--rule);
+}
+
+.lookup-bar input {
+  flex: 1;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82rem;
+  font-weight: 300;
+  padding: 0.7rem 1rem;
+  background: transparent;
+  border: none;
+  color: var(--fg);
+  outline: none;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.lookup-bar input::placeholder {
+  color: var(--muted);
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+
+.lookup-bar button {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.7rem 1.4rem;
+  background: var(--fg);
+  color: var(--bg);
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.lookup-bar button:hover { opacity: 0.8; }
+.lookup-bar button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.lookup-status {
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-align: center;
+  padding-top: 0.5rem;
+  min-height: 1.5rem;
+}
+
+.lookup-status.error { color: var(--red); }
+
 .container {
   width: min(90vw, 480px);
   opacity: 0;

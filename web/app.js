@@ -30,6 +30,22 @@
             if (e.target === aboutOverlay) closeAbout();
         });
 
+        // ── Ticker lookup ─────────────────────────────────────
+        var lookupForm = document.getElementById("lookup-form");
+        var lookupInput = document.getElementById("lookup-input");
+        var lookupBtn = document.getElementById("lookup-btn");
+
+        if (lookupForm) {
+            lookupForm.addEventListener("submit", function (e) {
+                e.preventDefault();
+                var ticker = lookupInput.value.trim().toUpperCase();
+                if (!ticker) return;
+                lookupBtn.disabled = true;
+                window.location.href = "/detail.html?ticker=" +
+                    encodeURIComponent(ticker) + "&source=lookup";
+            });
+        }
+
         fetchScreenedStocks();
 
         async function fetchScreenedStocks() {
@@ -194,7 +210,13 @@
             } catch (err) {
                 console.error("Report render failed:", err);
                 // Fallback: try screened detail, then legacy
-                if (source === "screened") {
+                if (source === "lookup") {
+                    contentEl.innerHTML =
+                        '<div class="empty-state"><div class="icon">&#10060;</div>' +
+                        '<div class="title">Analysis Failed</div>' +
+                        '<div class="subtitle">Could not analyze ' + escapeHtml(ticker) +
+                        '. The ticker may be invalid or data is unavailable.</div></div>';
+                } else if (source === "screened") {
                     fetchScreenedDetail(ticker);
                 } else {
                     fetchLegacyDetail(ticker);

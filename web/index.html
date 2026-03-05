@@ -11,6 +11,16 @@
 
   <button class="about-btn" id="about-btn">About</button>
 
+  <!-- Ticker lookup -->
+  <div class="lookup-bar" id="lookup-bar">
+    <form id="lookup-form" autocomplete="off">
+      <input type="text" id="lookup-input" placeholder="Look up any ticker..."
+             maxlength="10" spellcheck="false" autocapitalize="characters">
+      <button type="submit" id="lookup-btn">Analyze</button>
+    </form>
+    <div class="lookup-status" id="lookup-status"></div>
+  </div>
+
   <div class="container" id="ticker-container">
     <div class="loading-placeholder"></div>
   </div>

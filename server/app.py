@@ -14,6 +14,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from config_loader import load_config
 from server.database import Database
 from server.mock_financials import generate_mock_report
+from server.live_report import generate_live_report
 from server.scheduler import run_daily_pipeline
 
 logger = logging.getLogger(__name__)
@@ -145,12 +146,37 @@ async def trigger_pipeline():
 
 @app.get("/report/{ticker}")
 async def get_report(ticker: str):
-    """Generate a full financial report for a ticker."""
+    """Generate a full financial report for a ticker.
+
+    Uses pre-computed signal data when available, otherwise falls through
+    to live analysis using real yfinance data.
+    """
     signal_data = _db.get_signal_detail(ticker.upper())
-    if signal_data is None:
-        raise HTTPException(status_code=404, detail="Signal not found")
-    report = generate_mock_report(signal_data)
-    return report
+    if signal_data is not None:
+        report = generate_mock_report(signal_data)
+        return report
+    # Fall through to live analysis for tickers not in DB
+    try:
+        report = await asyncio.to_thread(generate_live_report, ticker.upper(), _config)
+        return report
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception("Live analysis failed for %s", ticker)
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+
+
+@app.get("/analyze/{ticker}")
+async def analyze_ticker(ticker: str):
+    """Live analysis for any ticker — fetches real data from yfinance."""
+    try:
+        report = await asyncio.to_thread(generate_live_report, ticker.upper(), _config)
+        return report
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception("Analysis failed for %s", ticker)
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 
 # ── Web frontend ─────────────────────────────────────────────
