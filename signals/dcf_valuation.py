@@ -294,6 +294,7 @@ def compute_dcf_valuation(
         result["base_iv"] = intrinsic
 
         if not np.isnan(market_price) and market_price > 0:
+            result["current_price"] = market_price
             result["margin_of_safety"] = (intrinsic - market_price) / intrinsic
             result["dcf_upside_pct"] = intrinsic / market_price - 1
 

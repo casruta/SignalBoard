@@ -327,7 +327,7 @@
 
         async function fetchScreenedStocks() {
             try {
-                var res = await fetch("/screened");
+                var res = await fetch("/screened?limit=3");
                 var data = await res.json();
                 var stocks = data.stocks || [];
                 if (stocks.length > 0) {
@@ -385,14 +385,22 @@
         }
 
         function renderStockRow(s, index) {
-            var upside = s.dcf_upside_pct != null ? (s.dcf_upside_pct * 100).toFixed(0) : "\u2014";
+            var upside;
+            if (s.dcf_upside_pct != null && s.intrinsic_value != null && s.current_price != null && s.current_price > 0) {
+                upside = ((s.intrinsic_value / s.current_price - 1) * 100).toFixed(0);
+            } else if (s.dcf_upside_pct != null) {
+                upside = (s.dcf_upside_pct * 100).toFixed(0);
+            } else {
+                upside = "—";
+            }
             var mos = s.margin_of_safety != null ? (s.margin_of_safety * 100).toFixed(0) : "\u2014";
             var iv = s.intrinsic_value != null ? "$" + Number(s.intrinsic_value).toFixed(2) : "\u2014";
             var price = s.current_price != null ? "$" + Number(s.current_price).toFixed(2) : "\u2014";
             var fcfYield = s.fcf_yield != null ? (s.fcf_yield * 100).toFixed(1) + "%" : "\u2014";
             var rank = s.rank || (index + 1);
 
-            var html = '<a class="ticker-row" href="/detail.html?ticker=' + encodeURIComponent(s.ticker) + '&source=screened">';
+            var html = '<div class="ticker-row-wrap">';
+            html += '<a class="ticker-row" href="/detail.html?ticker=' + encodeURIComponent(s.ticker) + '&source=screened">';
 
             // Primary line: rank + ticker + name + DCF upside
             html += '<div class="row-main">';
@@ -401,7 +409,7 @@
             html += '<span class="symbol">' + escapeHtml(s.ticker) + '</span>';
             html += '<span class="name-label">' + escapeHtml(s.short_name || "") + '</span>';
             html += '</div>';
-            var upsideSign = s.dcf_upside_pct != null && s.dcf_upside_pct >= 0 ? "+" : "";
+            var upsideSign = upside !== "—" && Number(upside) >= 0 ? "+" : "";
             html += '<span class="dcf-upside">' + upsideSign + upside + '%</span>';
             html += '</div>';
 
@@ -428,6 +436,8 @@
             html += '</div>';
 
             html += '</a>';
+            html += '<span class="report-icon" data-ticker="' + escapeHtml(s.ticker) + '" title="View investor report">&#9776;</span>';
+            html += '</div>';
             return html;
         }
 
@@ -523,6 +533,7 @@
         // ── Report rendering ─────────────────────────────────────
 
         function renderReport(data) {
+            window._reportMath = {};
             var sections = [
                 { id: "thesis", title: "Investment Thesis", html: renderThesis(data.thesis) },
                 { id: "dcf", title: "DCF Valuation", html: renderDCF(data.dcf) },
@@ -677,10 +688,11 @@
 
         function renderSnapshot(s) {
             if (!s) return "";
+            var sMath = s._math || {};
             var items = [
                 { label: "Market Cap", value: fmtB(s.market_cap) },
-                { label: "Enterprise Value", value: fmtB(s.enterprise_value) },
-                { label: "Shares Outstanding", value: fmtNum(s.shares_outstanding) },
+                { label: "Enterprise Value", value: fmtB(s.enterprise_value), mathField: "enterprise_value" },
+                { label: "Shares Outstanding", value: fmtNum(s.shares_outstanding), mathField: "shares_outstanding" },
                 { label: "52-Week Range", value: fmtUSD(s.range_52w_low) + " \u2013 " + fmtUSD(s.range_52w_high) },
                 { label: "Avg Volume (3M)", value: fmtNum(s.avg_volume_3m) },
                 { label: "Dividend Yield", value: fmtPctReport(s.dividend_yield) },
@@ -691,7 +703,13 @@
             for (var i = 0; i < items.length; i++) {
                 var ek = items[i].label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
                 var he = ek && typeof EXPLANATIONS !== "undefined" && EXPLANATIONS[ek];
-                html += '<div class="snapshot-item"><span class="snapshot-label' + (he ? ' explainable' : '') + '"' + (he ? ' data-explain="' + ek + '"' : '') + '>' + items[i].label + '</span><span class="snapshot-value">' + items[i].value + '</span></div>';
+                var mf = items[i].mathField;
+                var mk = null;
+                if (mf && sMath[mf]) {
+                    mk = "snapshot." + mf;
+                    window._reportMath[mk] = sMath[mf];
+                }
+                html += '<div class="snapshot-item"><span class="snapshot-label' + (he ? ' explainable' : '') + '"' + (he ? ' data-explain="' + ek + '"' : '') + '>' + items[i].label + '</span><span class="snapshot-value' + (mk ? ' has-math' : '') + '"' + (mk ? ' data-math-key="' + mk + '"' : '') + '>' + items[i].value + '</span></div>';
             }
             html += '</div>';
 
@@ -722,8 +740,52 @@
             return html;
         }
 
+        function formatMathValue(val, fmt) {
+            if (val == null) return "\u2014";
+            if (fmt === "pct") return fmtPctReport(val);
+            if (fmt === "usd") return fmtUSD(val);
+            if (fmt === "millions") return fmtM(val);
+            if (fmt === "billions") return fmtB(val);
+            if (fmt === "x") return fmtX(val);
+            if (fmt === "ratio") return val.toFixed(2);
+            if (fmt === "integer") return Math.round(val).toLocaleString();
+            if (fmt === "years") return val.toFixed(1) + " yrs";
+            if (fmt === "bps") return (val * 10000).toFixed(0) + " bps";
+            if (fmt === "number") return fmtNum(val);
+            if (typeof val === "number") {
+                if (Math.abs(val) >= 1e9) return fmtB(val);
+                if (Math.abs(val) >= 1e6) return fmtM(val);
+                return fmtNum(val);
+            }
+            return escapeHtml(String(val));
+        }
+
+        function renderMathBreakdown(math) {
+            if (!math) return "";
+            var html = '<div class="math-breakdown">';
+            html += '<div class="math-formula-name">' + escapeHtml(math.name || "") + '</div>';
+            if (math.inputs && math.inputs.length > 0) {
+                html += '<div class="math-inputs">';
+                for (var i = 0; i < math.inputs.length; i++) {
+                    var inp = math.inputs[i];
+                    html += '<div class="math-input-row"><span class="math-input-label">' + escapeHtml(inp.label) + '</span><span class="math-input-value">' + formatMathValue(inp.value, inp.fmt) + '</span></div>';
+                }
+                html += '</div>';
+            }
+            html += '<div class="math-formula-expr">' + escapeHtml(math.formula || "") + '</div>';
+            if (math.result) {
+                html += '<div class="math-result"><span class="math-result-label">' + escapeHtml(math.result.label) + '</span><span class="math-result-value">' + formatMathValue(math.result.value, math.result.fmt) + '</span></div>';
+            }
+            if (math.note) {
+                html += '<div class="math-note">' + escapeHtml(math.note) + '</div>';
+            }
+            html += '</div>';
+            return html;
+        }
+
         function renderFinTable(title, sectionId, headers, rows, options) {
             options = options || {};
+            var mathData = options.mathData || null;
             var html = '<div class="fin-table-wrapper">';
             if (title) html += '<h4>' + escapeHtml(title) + '</h4>';
             html += '<table class="fin-table">';
@@ -743,7 +805,12 @@
                 html += '<tr class="' + cls + '"><td' + (hasExplain ? ' class="explainable" data-explain="' + explainKey + '"' : '') + '>' + escapeHtml(row.label) + '</td>';
                 var vals = row.values || [];
                 for (var v = 0; v < headers.length; v++) {
-                    html += '<td>' + (v < vals.length ? formatCellValue(vals[v], row.format) : "\u2014") + '</td>';
+                    var mathKey = null;
+                    if (row.mathField && mathData && mathData[v] && mathData[v][row.mathField]) {
+                        mathKey = sectionId + "." + v + "." + row.mathField;
+                        window._reportMath[mathKey] = mathData[v][row.mathField];
+                    }
+                    html += '<td' + (mathKey ? ' class="has-math" data-math-key="' + mathKey + '"' : '') + '>' + (v < vals.length ? formatCellValue(vals[v], row.format) : "\u2014") + '</td>';
                 }
                 html += '</tr>';
             }
@@ -769,61 +836,81 @@
         function renderIncomeStatement(data) {
             if (!data || data.length === 0) return "";
             var headers = data.map(function (d) { return d.year; });
+            var mathArr = data.map(function (d) { return d._math || {}; });
             var rows = [
-                { label: "Revenue", values: data.map(function (d) { return d.revenue; }), type: "header", format: "millions" },
+                { label: "Revenue", values: data.map(function (d) { return d.revenue; }), type: "header", format: "millions", mathField: "revenue" },
                 { label: "YoY Growth", values: data.map(function (d) { return d.yoy_growth; }), type: "pct", format: "pct" },
-                { label: "Gross Margin", values: data.map(function (d) { return d.gross_margin; }), type: "pct", format: "pct" },
-                { label: "EBITDA", values: data.map(function (d) { return d.ebitda; }), format: "millions" },
-                { label: "EBITDA Margin", values: data.map(function (d) { return d.ebitda_margin; }), type: "pct", format: "pct" },
-                { label: "Net Income", values: data.map(function (d) { return d.net_income; }), type: "subtotal", format: "millions" },
-                { label: "Diluted EPS", values: data.map(function (d) { return d.diluted_eps; }), format: "usd" }
+                { label: "Gross Margin", values: data.map(function (d) { return d.gross_margin; }), type: "pct", format: "pct", mathField: "gross_margin" },
+                { label: "EBITDA", values: data.map(function (d) { return d.ebitda; }), format: "millions", mathField: "ebitda" },
+                { label: "EBITDA Margin", values: data.map(function (d) { return d.ebitda_margin; }), type: "pct", format: "pct", mathField: "ebitda_margin" },
+                { label: "Net Income", values: data.map(function (d) { return d.net_income; }), type: "subtotal", format: "millions", mathField: "net_income" },
+                { label: "Diluted EPS", values: data.map(function (d) { return d.diluted_eps; }), format: "usd", mathField: "diluted_eps" }
             ];
-            return renderFinTable(null, "income", headers, rows);
+            return renderFinTable(null, "income", headers, rows, { mathData: mathArr });
         }
 
         function renderBalanceSheet(data) {
             if (!data || data.length === 0) return "";
             var headers = data.map(function (d) { return d.year; });
+            var mathArr = data.map(function (d) { return d._math || {}; });
             var rows = [
-                { label: "Cash & Equivalents", values: data.map(function (d) { return d.cash; }), format: "millions" },
-                { label: "Total Assets", values: data.map(function (d) { return d.total_assets; }), type: "header", format: "millions" },
-                { label: "Total Debt", values: data.map(function (d) { return (d.long_term_debt || 0) + (d.short_term_debt || 0); }), format: "millions" },
-                { label: "Total Equity", values: data.map(function (d) { return d.total_equity; }), type: "subtotal", format: "millions" },
-                { label: "Book Value / Share", values: data.map(function (d) { return d.book_value_per_share; }), format: "usd" }
+                { label: "Cash & Equivalents", values: data.map(function (d) { return d.cash; }), format: "millions", mathField: "cash" },
+                { label: "Total Assets", values: data.map(function (d) { return d.total_assets; }), type: "header", format: "millions", mathField: "total_assets" },
+                { label: "Total Debt", values: data.map(function (d) { return (d.long_term_debt || 0) + (d.short_term_debt || 0); }), format: "millions", mathField: "total_debt" },
+                { label: "Total Equity", values: data.map(function (d) { return d.total_equity; }), type: "subtotal", format: "millions", mathField: "total_equity" },
+                { label: "Book Value / Share", values: data.map(function (d) { return d.book_value_per_share; }), format: "usd", mathField: "book_value_per_share" }
             ];
-            return renderFinTable(null, "balance", headers, rows);
+            return renderFinTable(null, "balance", headers, rows, { mathData: mathArr });
         }
 
         function renderCapitalStructure(data) {
             if (!data) return "";
+            var mathDict = data._math || {};
+            var mathArr = [mathDict];
             var rows = [
-                { label: "Net Debt", values: [data.net_debt], format: "millions" },
-                { label: "Net Debt / EBITDA", values: [data.net_debt_ebitda], format: "x" },
-                { label: "Debt / Equity", values: [data.debt_to_equity], format: "x" },
-                { label: "Interest Coverage", values: [data.interest_coverage], format: "x" },
-                { label: "Current Ratio", values: [data.current_ratio], format: "x" },
-                { label: "Quick Ratio", values: [data.quick_ratio], format: "x" }
+                { label: "Net Debt", values: [data.net_debt], format: "millions", mathField: "net_debt" },
+                { label: "Net Debt / EBITDA", values: [data.net_debt_ebitda], format: "x", mathField: "net_debt_ebitda" },
+                { label: "Debt / Equity", values: [data.debt_to_equity], format: "x", mathField: "debt_to_equity" },
+                { label: "Interest Coverage", values: [data.interest_coverage], format: "x", mathField: "interest_coverage" },
+                { label: "Current Ratio", values: [data.current_ratio], format: "x", mathField: "current_ratio" },
+                { label: "Quick Ratio", values: [data.quick_ratio], format: "x", mathField: "quick_ratio" }
             ];
-            return renderFinTable(null, "capital", ["Current"], rows);
+            return renderFinTable(null, "capital", ["Current"], rows, { mathData: mathArr });
         }
 
         function renderCashFlow(data) {
             if (!data || data.length === 0) return "";
             var headers = data.map(function (d) { return d.year; });
+            var mathArr = data.map(function (d) { return d._math || {}; });
             var rows = [
-                { label: "Cash from Operations", values: data.map(function (d) { return d.cfo; }), type: "header", format: "millions" },
-                { label: "CapEx", values: data.map(function (d) { return d.capex; }), format: "millions" },
-                { label: "Free Cash Flow", values: data.map(function (d) { return d.fcf; }), type: "subtotal", format: "millions" },
-                { label: "FCF Margin", values: data.map(function (d) { return d.fcf_margin; }), type: "pct", format: "pct" },
-                { label: "FCF Yield", values: data.map(function (d) { return d.fcf_yield; }), type: "pct", format: "pct" },
-                { label: "FCF / Share", values: data.map(function (d) { return d.fcf_per_share; }), format: "usd" }
+                { label: "Cash from Operations", values: data.map(function (d) { return d.cfo; }), type: "header", format: "millions", mathField: "cfo" },
+                { label: "CapEx", values: data.map(function (d) { return d.capex; }), format: "millions", mathField: "capex" },
+                { label: "Free Cash Flow", values: data.map(function (d) { return d.fcf; }), type: "subtotal", format: "millions", mathField: "fcf" },
+                { label: "FCF Margin", values: data.map(function (d) { return d.fcf_margin; }), type: "pct", format: "pct", mathField: "fcf_margin" },
+                { label: "FCF Yield", values: data.map(function (d) { return d.fcf_yield; }), type: "pct", format: "pct", mathField: "fcf_yield" },
+                { label: "FCF / Share", values: data.map(function (d) { return d.fcf_per_share; }), format: "usd", mathField: "fcf_per_share" }
             ];
-            return renderFinTable(null, "cashflow", headers, rows);
+            return renderFinTable(null, "cashflow", headers, rows, { mathData: mathArr });
         }
 
         function renderDCF(dcf) {
             if (!dcf) return "";
             var html = "";
+
+            // WACC Build section with math
+            if (dcf.wacc_build) {
+                var wb = dcf.wacc_build;
+                var wbMath = wb._math || {};
+                var wbMathArr = [wbMath];
+                var wbRows = [
+                    { label: "Cost of Equity", values: [wb.cost_of_equity], format: "pct", mathField: "cost_of_equity" },
+                    { label: "After-Tax Cost of Debt", values: [wb.after_tax_cost_of_debt], format: "pct", mathField: "after_tax_cost_of_debt" },
+                    { label: "WACC", values: [wb.wacc], format: "pct", type: "subtotal", mathField: "wacc" }
+                ];
+                html += '<div class="dcf-sub-table">';
+                html += renderFinTable("WACC Build", "dcf-wacc", ["Value"], wbRows, { mathData: wbMathArr });
+                html += '</div>';
+            }
 
             if (dcf.assumptions) {
                 var a = dcf.assumptions;
@@ -840,15 +927,17 @@
 
             if (dcf.output) {
                 var o = dcf.output;
+                var oMath = o._math || {};
+                var oMathArr = [oMath];
                 var oRows = [
-                    { label: "PV of Cash Flows", values: [o.pv_fcfs], format: "millions" },
-                    { label: "PV of Terminal Value", values: [o.pv_terminal], format: "millions" },
-                    { label: "Implied Enterprise Value", values: [o.implied_ev], type: "subtotal", format: "millions" },
-                    { label: "Implied Price / Share", values: [o.implied_price], type: "header", format: "usd" },
-                    { label: "Upside / (Downside)", values: [o.upside_pct != null ? fmtPctSigned(o.upside_pct) : null], type: "pct" }
+                    { label: "PV of Cash Flows", values: [o.pv_fcfs], format: "millions", mathField: "pv_fcfs" },
+                    { label: "PV of Terminal Value", values: [o.pv_terminal], format: "millions", mathField: "pv_terminal" },
+                    { label: "Implied Enterprise Value", values: [o.implied_ev], type: "subtotal", format: "millions", mathField: "implied_ev" },
+                    { label: "Implied Price / Share", values: [o.implied_price], type: "header", format: "usd", mathField: "implied_price" },
+                    { label: "Upside / (Downside)", values: [o.upside_pct != null ? fmtPctSigned(o.upside_pct) : null], type: "pct", mathField: "upside_pct" }
                 ];
                 html += '<div class="dcf-sub-table">';
-                html += renderFinTable("Valuation Output", "dcf-output", ["Value"], oRows);
+                html += renderFinTable("Valuation Output", "dcf-output", ["Value"], oRows, { mathData: oMathArr });
                 html += '</div>';
             }
 
@@ -868,6 +957,7 @@
             var matrix = sens.matrix || [];
             var midRow = Math.floor(matrix.length / 2);
             var midCol = Math.floor(waccVals.length / 2);
+            var sensTemplate = (sens._math && sens._math.template) ? sens._math.template : null;
 
             var html = '<h4>Sensitivity Analysis (WACC vs Terminal Growth)</h4>';
             html += '<div class="fin-table-wrapper"><table class="fin-table sensitivity-grid">';
@@ -885,7 +975,21 @@
                         cellClass = val > currentPrice ? "positive" : "negative";
                     }
                     if (r === midRow && c === midCol) cellClass += " base-case";
-                    html += '<td class="' + cellClass.trim() + '">' + fmtUSD(val) + '</td>';
+                    var smk = "";
+                    if (sensTemplate) {
+                        var sk = "dcf.sens." + r + "." + c;
+                        var cellMath = JSON.parse(JSON.stringify(sensTemplate));
+                        cellMath.inputs = cellMath.inputs.concat([
+                            { label: "WACC (this cell)", value: waccVals[r], fmt: "pct" },
+                            { label: "Terminal Growth (this cell)", value: growthVals[c], fmt: "pct" }
+                        ]);
+                        cellMath.result = { label: "Implied Price", value: val, fmt: "usd" };
+                        window._reportMath[sk] = cellMath;
+                        smk = ' class="' + cellClass.trim() + ' has-math" data-math-key="' + sk + '"';
+                    } else {
+                        smk = ' class="' + cellClass.trim() + '"';
+                    }
+                    html += '<td' + smk + '>' + fmtUSD(val) + '</td>';
                 }
                 html += '</tr>';
             }
@@ -895,21 +999,28 @@
 
         function renderProfitability(p) {
             if (!p) return "";
+            var pMath = p._math || {};
             var items = [
-                { label: "ROE", value: fmtPctReport(p.roe) },
-                { label: "ROA", value: fmtPctReport(p.roa) },
-                { label: "ROIC", value: fmtPctReport(p.roic) },
-                { label: "Asset Turnover", value: fmtX(p.asset_turnover) },
-                { label: "Inventory Turnover", value: fmtX(p.inventory_turnover) },
-                { label: "DSO", value: p.dso != null ? Math.round(p.dso) + " days" : "\u2014" },
-                { label: "DPO", value: p.dpo != null ? Math.round(p.dpo) + " days" : "\u2014" },
-                { label: "Cash Conversion Cycle", value: p.cash_conversion_cycle != null ? Math.round(p.cash_conversion_cycle) + " days" : "\u2014" }
+                { label: "ROE", value: fmtPctReport(p.roe), mathField: "roe" },
+                { label: "ROA", value: fmtPctReport(p.roa), mathField: "roa" },
+                { label: "ROIC", value: fmtPctReport(p.roic), mathField: "roic" },
+                { label: "Asset Turnover", value: fmtX(p.asset_turnover), mathField: "asset_turnover" },
+                { label: "Inventory Turnover", value: fmtX(p.inventory_turnover), mathField: "inventory_turnover" },
+                { label: "DSO", value: p.dso != null ? Math.round(p.dso) + " days" : "\u2014", mathField: "dso" },
+                { label: "DPO", value: p.dpo != null ? Math.round(p.dpo) + " days" : "\u2014", mathField: "dpo" },
+                { label: "Cash Conversion Cycle", value: p.cash_conversion_cycle != null ? Math.round(p.cash_conversion_cycle) + " days" : "\u2014", mathField: "cash_conversion_cycle" }
             ];
             var html = '<div class="snapshot-grid">';
             for (var i = 0; i < items.length; i++) {
                 var ek = items[i].label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
                 var he = ek && typeof EXPLANATIONS !== "undefined" && EXPLANATIONS[ek];
-                html += '<div class="snapshot-item"><span class="snapshot-label' + (he ? ' explainable' : '') + '"' + (he ? ' data-explain="' + ek + '"' : '') + '>' + items[i].label + '</span><span class="snapshot-value">' + items[i].value + '</span></div>';
+                var mf = items[i].mathField;
+                var mk = null;
+                if (mf && pMath[mf]) {
+                    mk = "profitability." + mf;
+                    window._reportMath[mk] = pMath[mf];
+                }
+                html += '<div class="snapshot-item"><span class="snapshot-label' + (he ? ' explainable' : '') + '"' + (he ? ' data-explain="' + ek + '"' : '') + '>' + items[i].label + '</span><span class="snapshot-value' + (mk ? ' has-math' : '') + '"' + (mk ? ' data-math-key="' + mk + '"' : '') + '>' + items[i].value + '</span></div>';
             }
             html += '</div>';
             return html;
@@ -917,15 +1028,16 @@
 
         function renderCapitalEfficiency(ce) {
             if (!ce) return "";
+            var ceMath = ce._math || {};
             var fmtM = function(v) {
                 if (v == null) return "\u2014";
                 return Math.abs(v) >= 1e9 ? "$" + (v/1e9).toFixed(1) + "B" : "$" + Math.round(v/1e6) + "M";
             };
             var items = [
-                { label: "R&D Intensity", value: fmtPctReport(ce.rd_intensity) },
-                { label: "CapEx Intensity", value: fmtPctReport(ce.capex_intensity) },
-                { label: "R&D / CapEx", value: ce.rd_to_capex != null ? ce.rd_to_capex.toFixed(1) + "x" : "\u2014" },
-                { label: "R&D ROI Proxy", value: ce.rd_roi_proxy != null ? ce.rd_roi_proxy.toFixed(1) + "x" : "\u2014" },
+                { label: "R&D Intensity", value: fmtPctReport(ce.rd_intensity), mathField: "rd_intensity" },
+                { label: "CapEx Intensity", value: fmtPctReport(ce.capex_intensity), mathField: "capex_intensity" },
+                { label: "R&D / CapEx", value: ce.rd_to_capex != null ? ce.rd_to_capex.toFixed(1) + "x" : "\u2014", mathField: "rd_to_capex" },
+                { label: "R&D ROI Proxy", value: ce.rd_roi_proxy != null ? ce.rd_roi_proxy.toFixed(1) + "x" : "\u2014", mathField: "rd_roi_proxy" },
                 { label: "R&D Expense", value: fmtM(ce.rd_expense) },
                 { label: "CapEx", value: fmtM(ce.capex) }
             ];
@@ -933,7 +1045,13 @@
             for (var i = 0; i < items.length; i++) {
                 var ek = items[i].label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
                 var he = ek && typeof EXPLANATIONS !== "undefined" && EXPLANATIONS[ek];
-                html += '<div class="snapshot-item"><span class="snapshot-label' + (he ? ' explainable' : '') + '"' + (he ? ' data-explain="' + ek + '"' : '') + '>' + items[i].label + '</span><span class="snapshot-value">' + items[i].value + '</span></div>';
+                var mf = items[i].mathField;
+                var mk = null;
+                if (mf && ceMath[mf]) {
+                    mk = "capeff." + mf;
+                    window._reportMath[mk] = ceMath[mf];
+                }
+                html += '<div class="snapshot-item"><span class="snapshot-label' + (he ? ' explainable' : '') + '"' + (he ? ' data-explain="' + ek + '"' : '') + '>' + items[i].label + '</span><span class="snapshot-value' + (mk ? ' has-math' : '') + '"' + (mk ? ' data-math-key="' + mk + '"' : '') + '>' + items[i].value + '</span></div>';
             }
             html += '</div>';
             return html;
@@ -978,7 +1096,12 @@
                 html += '<td>' + fmtUSD(contribution) + '</td>';
                 html += '</tr>';
             }
-            html += '<tr class="row-subtotal"><td>Blended Target</td><td></td><td></td><td>' + fmtUSD(pt.blended) + '</td></tr>';
+            var blMathKey = "";
+            if (pt._math && pt._math.blended) {
+                blMathKey = "pricetarget.blended";
+                window._reportMath[blMathKey] = pt._math.blended;
+            }
+            html += '<tr class="row-subtotal"><td>Blended Target</td><td></td><td></td><td' + (blMathKey ? ' class="has-math" data-math-key="' + blMathKey + '"' : '') + '>' + fmtUSD(pt.blended) + '</td></tr>';
             html += '</tbody></table></div>';
 
             var segmentClasses = ["dcf-segment", "comps-segment", "tech-segment"];
@@ -1003,7 +1126,7 @@
             if (header && header.upside_pct != null) {
                 var upsideVal = header.upside_pct;
                 var upsideCls = upsideVal >= 0 ? "positive" : "negative";
-                html += '<div class="verdict-upside ' + upsideCls + '" style="font-size:1.8rem;font-weight:700;margin:8px 0">' + fmtPctSigned(upsideVal) + ' upside</div>';
+                html += '<div class="verdict-upside ' + upsideCls + '">' + fmtPctSigned(upsideVal) + ' upside</div>';
             }
             html += '<div class="verdict-target">Price Target: ' + fmtUSD(v.price_target) + '</div>';
             if (v.confidence != null) {
@@ -1141,6 +1264,14 @@
             if (analysis.accruals_ratio != null) html += metricRow("Accruals Ratio", analysis.accruals_ratio.toFixed(3));
             html += '</div></div>';
 
+            if (!html.replace(/<[^>]*>/g, "").trim()) {
+                html = '<div class="empty-state">' +
+                    '<div class="icon">&#8212;</div>' +
+                    '<div class="title">No Detail Available</div>' +
+                    '<div class="subtitle">Analysis data for ' + escapeHtml(s.ticker) + ' is incomplete.</div>' +
+                    '</div>';
+            }
+
             contentEl.innerHTML = html;
         }
 
@@ -1222,44 +1353,76 @@
                 '<p>' + escapeHtml(text) + '</p></div>'
             );
         }
-    }
 
-    // ── Explanation Panel ──────────────────────────────────────
+        // ── Explanation Panel ──────────────────────────────────────
 
-    function initExplainPanel(contentEl) {
-        var panel = document.getElementById("explain-panel");
-        var termEl = document.getElementById("explain-term");
-        var textEl = document.getElementById("explain-text");
-        var whyEl = document.getElementById("explain-why");
-        var closeBtn = document.getElementById("explain-close");
-        if (!panel || !termEl || !textEl || !whyEl) return;
+        function initExplainPanel(contentEl) {
+            var panel = document.getElementById("explain-panel");
+            var termEl = document.getElementById("explain-term");
+            var textEl = document.getElementById("explain-text");
+            var whyEl = document.getElementById("explain-why");
+            var mathContainer = document.getElementById("explain-math-container");
+            var closeBtn = document.getElementById("explain-close");
+            if (!panel || !termEl || !textEl || !whyEl) return;
 
-        var activeEl = null;
+            var activeEl = null;
 
-        contentEl.addEventListener("click", function (e) {
-            var target = e.target.closest("[data-explain]");
-            if (!target) return;
-            var key = target.getAttribute("data-explain");
-            var info = EXPLANATIONS[key];
-            if (!info) return;
+            contentEl.addEventListener("click", function (e) {
+                var explainTarget = e.target.closest("[data-explain]");
+                var mathTarget = e.target.closest("[data-math-key]");
+                if (!explainTarget && !mathTarget) return;
 
-            if (activeEl) activeEl.classList.remove("active");
-            target.classList.add("active");
-            activeEl = target;
+                if (activeEl) activeEl.classList.remove("active");
+                var target = mathTarget || explainTarget;
+                target.classList.add("active");
+                activeEl = target;
 
-            termEl.textContent = info.title;
-            textEl.textContent = info.text;
-            whyEl.textContent = info.why;
-            panel.classList.add("open");
-        });
+                // Term explanation
+                if (explainTarget) {
+                    var key = explainTarget.getAttribute("data-explain");
+                    var info = EXPLANATIONS[key];
+                    if (info) {
+                        termEl.textContent = info.title;
+                        textEl.textContent = info.text;
+                        whyEl.textContent = info.why;
+                    } else {
+                        termEl.textContent = "";
+                        textEl.textContent = "";
+                        whyEl.textContent = "";
+                    }
+                } else {
+                    termEl.textContent = "";
+                    textEl.textContent = "";
+                    whyEl.textContent = "";
+                }
 
-        closeBtn.addEventListener("click", function () {
-            panel.classList.remove("open");
-            if (activeEl) {
-                activeEl.classList.remove("active");
-                activeEl = null;
-            }
-        });
+                // Math breakdown
+                if (mathContainer) {
+                    if (mathTarget) {
+                        var mathKey = mathTarget.getAttribute("data-math-key");
+                        var math = window._reportMath ? window._reportMath[mathKey] : null;
+                        if (math) {
+                            var hasExplain = explainTarget && termEl.textContent;
+                            mathContainer.innerHTML = (hasExplain ? '<hr class="math-divider">' : '') + renderMathBreakdown(math);
+                        } else {
+                            mathContainer.innerHTML = "";
+                        }
+                    } else {
+                        mathContainer.innerHTML = "";
+                    }
+                }
+
+                panel.classList.add("open");
+            });
+
+            closeBtn.addEventListener("click", function () {
+                panel.classList.remove("open");
+                if (activeEl) {
+                    activeEl.classList.remove("active");
+                    activeEl = null;
+                }
+            });
+        }
     }
 
     // ── Helpers ──────────────────────────────────────────────
@@ -1275,6 +1438,82 @@
         var div = document.createElement("div");
         div.appendChild(document.createTextNode(str));
         return div.innerHTML;
+    }
+
+    // ── Investor Report Modal ────────────────────────────────
+
+    function initReportModal() {
+        // Create modal overlay once
+        var overlay = document.createElement("div");
+        overlay.className = "report-modal-overlay";
+        overlay.innerHTML =
+            '<div class="report-modal">' +
+            '<button class="report-modal-close">&times;</button>' +
+            '<div class="report-modal-body"></div>' +
+            '</div>';
+        document.body.appendChild(overlay);
+
+        var modalBody = overlay.querySelector(".report-modal-body");
+        var closeBtn = overlay.querySelector(".report-modal-close");
+
+        closeBtn.addEventListener("click", function () {
+            overlay.classList.remove("open");
+        });
+        overlay.addEventListener("click", function (e) {
+            if (e.target === overlay) overlay.classList.remove("open");
+        });
+
+        // Delegate click on report icons
+        document.addEventListener("click", function (e) {
+            var icon = e.target.closest(".report-icon");
+            if (!icon) return;
+            e.preventDefault();
+            e.stopPropagation();
+            var ticker = icon.getAttribute("data-ticker");
+            if (!ticker) return;
+            modalBody.innerHTML = '<div class="loading"></div>';
+            overlay.classList.add("open");
+            fetch("/investor-report/" + encodeURIComponent(ticker))
+                .then(function (res) {
+                    if (!res.ok) throw new Error("Not found");
+                    return res.json();
+                })
+                .then(function (data) {
+                    modalBody.innerHTML = markdownToHtml(data.markdown || "No report available.");
+                })
+                .catch(function () {
+                    modalBody.innerHTML = '<p style="color:var(--muted)">Report not available for this ticker.</p>';
+                });
+        });
+    }
+
+    function markdownToHtml(md) {
+        // Minimal markdown renderer: headers, bold, italic, hr, paragraphs
+        var lines = md.split("\n");
+        var html = "";
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            if (/^#{1,3}\s/.test(line)) {
+                var level = line.match(/^(#+)/)[1].length;
+                var text = line.replace(/^#+\s*/, "");
+                html += "<h" + level + ">" + text + "</h" + level + ">";
+            } else if (/^---/.test(line)) {
+                html += "<hr>";
+            } else if (line.trim() === "") {
+                html += "";
+            } else {
+                // Bold and italic
+                line = line.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+                line = line.replace(/\*(.+?)\*/g, "<em>$1</em>");
+                html += "<p>" + line + "</p>";
+            }
+        }
+        return html;
+    }
+
+    // Init modal on list page
+    if (document.body.getAttribute("data-page") === "list") {
+        initReportModal();
     }
 
 })();

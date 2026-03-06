@@ -79,6 +79,17 @@ def _dollar_val(m) -> float:
     return float(m.group(1)) * (1e9 if m.group(2).upper() == "B" else 1e6)
 
 
+def _m(name: str, formula: str, inputs: list[tuple], result: tuple, note: str | None = None) -> dict:
+    """Build a math breakdown dict for the explain panel."""
+    return {
+        "name": name,
+        "formula": formula,
+        "inputs": [{"label": l, "value": v, "fmt": f} for l, v, f in inputs],
+        "result": {"label": result[0], "value": result[1], "fmt": result[2]},
+        "note": note,
+    }
+
+
 def _parse_anchors(signal: dict) -> _Anchors:
     a = _Anchors()
     parts = signal.get("fundamental",{}).get("points",[]) + signal.get("macro",{}).get("points",[])
@@ -176,8 +187,36 @@ def _build_is(p: dict, a: _Anchors, sh: float) -> List[dict]:
         ie = (a.net_debt or p["mc"]*0.15)*0.055 if (a.net_debt or 0) > 0 else p["mc"]*0.01
         pt = op - ie; tx = pt*p["tax"] if pt > 0 else 0; ni = pt - tx
         ebitda = op + rev*p["dna"] + sbc
+        yoy = p["rg"] if off > -2 else p["rg"] * 0.8
+        math = {
+            "revenue": _m("Revenue", "Market Cap / EV/Revenue", [
+                ("Market Cap", p["mc"], "millions"), ("EV/Revenue Multiple", p["ev_rev"], "x")],
+                ("Revenue", round(rev, 0), "millions"),
+                "Back-solved from current market cap and sector EV/Revenue multiple" if off == 0 else f"Adjusted by {yoy:.1%} growth rate"),
+            "gross_margin": _m("Gross Margin", "Gross Profit / Revenue", [
+                ("Revenue", round(rev, 0), "millions"), ("Gross Profit", round(gp, 0), "millions")],
+                ("Gross Margin", round(gm, 4), "pct")),
+            "ebitda": _m("EBITDA", "Operating Income + D&A + SBC", [
+                ("Operating Income", round(op, 0), "millions"),
+                ("D&A", round(rev * p["dna"], 0), "millions"),
+                ("Stock-Based Comp", round(sbc, 0), "millions")],
+                ("EBITDA", round(ebitda, 0), "millions")),
+            "ebitda_margin": _m("EBITDA Margin", "EBITDA / Revenue", [
+                ("EBITDA", round(ebitda, 0), "millions"), ("Revenue", round(rev, 0), "millions")],
+                ("EBITDA Margin", round(ebitda / rev if rev else 0, 4), "pct")),
+            "net_income": _m("Net Income", "Pretax Income - Tax Expense", [
+                ("Operating Income", round(op, 0), "millions"),
+                ("Interest Expense", round(ie, 0), "millions"),
+                ("Pretax Income", round(pt, 0), "millions"),
+                ("Tax Rate", round(p["tax"], 4), "pct"),
+                ("Tax Expense", round(tx, 0), "millions")],
+                ("Net Income", round(ni, 0), "millions")),
+            "diluted_eps": _m("Diluted EPS", "Net Income / Shares Outstanding", [
+                ("Net Income", round(ni, 0), "millions"), ("Shares Outstanding", round(sh, 0), "raw")],
+                ("Diluted EPS", round(ni / sh if sh else 0, 2), "usd")),
+        }
         rows.append({"year":f"FY{yr0+off}","revenue":round(rev,0),
-            "yoy_growth":round(p["rg"] if off>-2 else p["rg"]*0.8,4),
+            "yoy_growth":round(yoy,4),
             "cogs":round(cogs,0),"gross_profit":round(gp,0),"gross_margin":round(gm,4),
             "rd_expense":round(rd,0),"sga_expense":round(sga,0),
             "operating_income":round(op,0),"operating_margin":round(op/rev if rev else 0,4),
@@ -186,7 +225,7 @@ def _build_is(p: dict, a: _Anchors, sh: float) -> List[dict]:
             "net_income":round(ni,0),"net_margin":round(ni/rev if rev else 0,4),
             "diluted_eps":round(ni/sh if sh else 0,2),
             "ebitda":round(ebitda,0),"ebitda_margin":round(ebitda/rev if rev else 0,4),
-            "sbc":round(sbc,0)})
+            "sbc":round(sbc,0),"_math":math})
     return rows
 
 
@@ -201,13 +240,34 @@ def _build_bs(p: dict, a: _Anchors, sh: float, isd: List[dict]) -> List[dict]:
         tca = cash+recv+inv; ppe = rev*p["capex"]*5; ap = rev*0.08; tcl = ap+std
         eq = (p["mc"]/(a.book_multiple or 2.5)) * (0.9+0.05*i)
         tl = tcl + ltd; ta = eq + tl; gw = max(ta - tca - ppe, 0)
+        bm = a.book_multiple or 2.5
+        inv_pct = 0.06 if p["gm"] < 0.6 else 0.02
+        math = {
+            "cash": _m("Cash & Equivalents", "Revenue x 5%" if nd > 0 else "Revenue x 12% - min(Net Debt, 0)", [
+                ("Revenue", round(rev, 0), "millions"), ("Net Debt", round(nd, 0), "millions")],
+                ("Cash", round(cash, 0), "millions")),
+            "total_assets": _m("Total Assets", "Total Equity + Total Liabilities", [
+                ("Total Equity", round(eq, 0), "millions"), ("Total Liabilities", round(tl, 0), "millions")],
+                ("Total Assets", round(ta, 0), "millions")),
+            "total_debt": _m("Total Debt", "Long-Term Debt + Short-Term Debt", [
+                ("Long-Term Debt", round(ltd, 0), "millions"), ("Short-Term Debt", round(std, 0), "millions")],
+                ("Total Debt", round(ltd + std, 0), "millions"),
+                f"Net debt split 80/20 LT/ST from {'anchor' if a.net_debt else 'Market Cap x 15%'}"),
+            "total_equity": _m("Total Equity", "Market Cap / Book Multiple x Adj", [
+                ("Market Cap", p["mc"], "millions"), ("Book Multiple", bm, "x"),
+                ("Year Adj", round(0.9 + 0.05 * i, 2), "raw")],
+                ("Total Equity", round(eq, 0), "millions")),
+            "book_value_per_share": _m("Book Value / Share", "Total Equity / Shares", [
+                ("Total Equity", round(eq, 0), "millions"), ("Shares Outstanding", round(sh, 0), "raw")],
+                ("BV/Share", round(eq / sh if sh else 0, 2), "usd")),
+        }
         rows.append({"year":inc["year"],"cash":round(cash,0),"receivables":round(recv,0),
             "inventory":round(inv,0),"total_current_assets":round(tca,0),
             "ppe_net":round(ppe,0),"goodwill":round(gw,0),"total_assets":round(ta,0),
             "accounts_payable":round(ap,0),"short_term_debt":round(std,0),
             "total_current_liabilities":round(tcl,0),"long_term_debt":round(ltd,0),
             "total_liabilities":round(tl,0),"total_equity":round(eq,0),
-            "book_value_per_share":round(eq/sh if sh else 0,2)})
+            "book_value_per_share":round(eq/sh if sh else 0,2),"_math":math})
     return rows
 
 
@@ -220,13 +280,34 @@ def _build_cf(p: dict, a: _Anchors, sh: float, isd: List[dict]) -> List[dict]:
         fcf = cfo + cap  # exact on rounded values
         bb = -p["mc"]*(a.buyback_yield or 0) if (a.buyback_yield or 0) > 0 else 0
         div = -p["mc"]*p["div"]; cff = bb+div
+        math = {
+            "cfo": _m("Cash from Operations", "Net Income + D&A + SBC + WC Change", [
+                ("Net Income", round(ni, 0), "millions"), ("D&A", round(dna, 0), "millions"),
+                ("SBC", round(sbc, 0), "millions"), ("WC Change", round(wc, 0), "millions")],
+                ("CFO", cfo, "millions")),
+            "capex": _m("Capital Expenditures", "-Revenue x CapEx %", [
+                ("Revenue", round(rev, 0), "millions"), ("CapEx % of Rev", round(p["capex"], 4), "pct")],
+                ("CapEx", cap, "millions")),
+            "fcf": _m("Free Cash Flow", "CFO + CapEx", [
+                ("CFO", cfo, "millions"), ("CapEx", cap, "millions")],
+                ("FCF", fcf, "millions")),
+            "fcf_margin": _m("FCF Margin", "FCF / Revenue", [
+                ("FCF", fcf, "millions"), ("Revenue", round(rev, 0), "millions")],
+                ("FCF Margin", round(fcf / rev if rev else 0, 4), "pct")),
+            "fcf_yield": _m("FCF Yield", "FCF / Market Cap", [
+                ("FCF", fcf, "millions"), ("Market Cap", p["mc"], "millions")],
+                ("FCF Yield", round(fcf / p["mc"] if p["mc"] else 0, 4), "pct")),
+            "fcf_per_share": _m("FCF / Share", "FCF / Shares Outstanding", [
+                ("FCF", fcf, "millions"), ("Shares Outstanding", round(sh, 0), "raw")],
+                ("FCF/Share", round(fcf / sh if sh else 0, 2), "usd")),
+        }
         rows.append({"year":inc["year"],"net_income":round(ni,0),"dna":round(dna,0),
             "sbc":round(sbc,0),"working_capital_change":round(wc,0),"cfo":cfo,"capex":cap,
             "acquisitions":0,"cfi":cap,"debt_change":0,"buybacks":round(bb,0),
             "dividends":round(div,0),"cff":round(cff,0),"fcf":fcf,
             "fcf_margin":round(fcf/rev if rev else 0,4),
             "fcf_yield":round(fcf/p["mc"] if p["mc"] else 0,4),
-            "fcf_per_share":round(fcf/sh if sh else 0,2)})
+            "fcf_per_share":round(fcf/sh if sh else 0,2),"_math":math})
     return rows
 
 
@@ -247,10 +328,24 @@ def _build_dcf(p: dict, a: _Anchors, sh: float, isd: List[dict], action: str, pr
         em = em_term + em_boost*(i/5); eb = rv*em; dn = rv*p["dna"]
         ebit = eb-dn; tx = ebit*p["tax"] if ebit>0 else 0; nopat = ebit-tx
         cx = -rv*p["capex"]; nwc = -rv*0.01; uf = nopat+dn+cx+nwc
+        proj_math = {
+            "revenue": _m("Projected Revenue", "Base Revenue x (1 + Growth)^Year", [
+                ("Base Revenue", round(rev_base, 0), "millions"),
+                ("Growth Factor", round(gf, 4), "pct"), ("Year", i, "raw")],
+                ("Revenue", round(rv, 0), "millions"),
+                f"Growth fades 10% per year from {cagr:.1%} base CAGR"),
+            "ebitda": _m("Projected EBITDA", "Revenue x EBITDA Margin", [
+                ("Revenue", round(rv, 0), "millions"), ("EBITDA Margin", round(em, 4), "pct")],
+                ("EBITDA", round(eb, 0), "millions")),
+            "ufcf": _m("Unlevered FCF", "NOPAT + D&A + CapEx + NWC Change", [
+                ("NOPAT", round(nopat, 0), "millions"), ("D&A", round(dn, 0), "millions"),
+                ("CapEx", round(cx, 0), "millions"), ("NWC Change", round(nwc, 0), "millions")],
+                ("UFCF", round(uf, 0), "millions")),
+        }
         projs.append({"year":yr0+i,"revenue":round(rv,0),"rev_growth":round(gf,4),
             "ebitda":round(eb,0),"ebitda_margin":round(em,4),"dna":round(dn,0),
             "ebit":round(ebit,0),"taxes":round(tx,0),"nopat":round(nopat,0),
-            "capex":round(cx,0),"nwc_change":round(nwc,0),"ufcf":round(uf,0)})
+            "capex":round(cx,0),"nwc_change":round(nwc,0),"ufcf":round(uf,0),"_math":proj_math})
     df = [(1+w)**i for i in range(1,6)]
     pv_f = sum(pr["ufcf"]/d for pr,d in zip(projs,df)); cash = isd[-1]["revenue"]*0.05
     # Back-solve terminal growth via bisection
@@ -267,6 +362,51 @@ def _build_dcf(p: dict, a: _Anchors, sh: float, isd: List[dict], action: str, pr
     tv = lu*(1+tg)/(w-tg) if w>tg else lu*(1+tg)/0.005
     pvt = tv/d5; iev = pv_f+pvt; ieq = iev-max(nd,0)+cash
     ip = max(ieq/sh if sh else 0, price*0.15)
+    # WACC build math
+    wacc_math = {
+        "cost_of_equity": _m("Cost of Equity (CAPM)", "Risk-Free Rate + Beta x ERP", [
+            ("Risk-Free Rate", rf, "pct"), ("Beta", round(b, 2), "raw"), ("Equity Risk Premium", erp, "pct")],
+            ("Cost of Equity", round(coe, 4), "pct")),
+        "after_tax_cost_of_debt": _m("After-Tax Cost of Debt", "Pre-Tax CoD x (1 - Tax Rate)", [
+            ("Pre-Tax Cost of Debt", pcod, "pct"), ("Tax Rate", round(p["tax"], 4), "pct")],
+            ("After-Tax CoD", round(acod, 4), "pct")),
+        "wacc": _m("WACC", "CoE x Equity Weight + CoD x Debt Weight", [
+            ("Cost of Equity", round(coe, 4), "pct"), ("Equity Weight", round(ew, 4), "pct"),
+            ("After-Tax CoD", round(acod, 4), "pct"), ("Debt Weight", round(dw, 4), "pct")],
+            ("WACC", round(cw, 4), "pct")),
+    }
+    # Output math
+    output_math = {
+        "pv_fcfs": _m("PV of Cash Flows", "Sum of UFCF[i] / (1+WACC)^i", [
+            ("WACC", round(w, 4), "pct")] + [
+            (f"UFCF Year {pr['year']}", pr["ufcf"], "millions") for pr in projs],
+            ("PV of FCFs", round(pv_f, 0), "millions")),
+        "pv_terminal": _m("PV of Terminal Value", "Terminal Value / (1+WACC)^5", [
+            ("Last UFCF", lu, "millions"), ("Terminal Growth", round(tg, 4), "pct"),
+            ("WACC", round(w, 4), "pct"), ("Terminal Value", round(tv, 0), "millions"),
+            ("Discount Factor (5yr)", round(d5, 4), "raw")],
+            ("PV of Terminal", round(pvt, 0), "millions"),
+            "Gordon Growth: UFCF x (1+g) / (WACC-g)"),
+        "implied_ev": _m("Implied Enterprise Value", "PV of FCFs + PV of Terminal", [
+            ("PV of FCFs", round(pv_f, 0), "millions"), ("PV of Terminal", round(pvt, 0), "millions")],
+            ("Implied EV", round(iev, 0), "millions")),
+        "implied_price": _m("Implied Price / Share", "(Implied EV - Net Debt + Cash) / Shares", [
+            ("Implied EV", round(iev, 0), "millions"), ("Net Debt", round(nd, 0), "millions"),
+            ("Cash", round(cash, 0), "millions"), ("Shares", round(sh, 0), "raw")],
+            ("Implied Price", round(ip, 2), "usd")),
+        "upside_pct": _m("Upside / (Downside)", "(Implied Price / Current Price) - 1", [
+            ("Implied Price", round(ip, 2), "usd"), ("Current Price", price, "usd")],
+            ("Upside", round(ip / price - 1 if price else 0, 4), "pct")),
+    }
+    # Sensitivity math template
+    sens_math = {
+        "template": _m("Sensitivity Cell", "(UFCF x (1+g)) / (WACC-g) / (1+WACC)^5 + PV FCFs - Net Debt + Cash) / Shares", [
+            ("Last UFCF (Year 5)", lu, "millions"), ("PV of FCFs", round(pv_f, 0), "millions"),
+            ("Net Debt", round(nd, 0), "millions"), ("Cash", round(cash, 0), "millions"),
+            ("Shares", round(sh, 0), "raw")],
+            ("Implied Price", 0, "usd"),
+            "WACC and Terminal Growth vary per cell"),
+    }
     # Sensitivity 5x5
     wv = [round(w+d,4) for d in [-.01,-.005,0,.005,.01]]
     gv = [round(tg+d,4) for d in [-.005,-.0025,0,.0025,.005]]
@@ -281,14 +421,17 @@ def _build_dcf(p: dict, a: _Anchors, sh: float, isd: List[dict], action: str, pr
         "terminal_method":"perpetuity_growth"},
     "wacc_build":{"risk_free_rate":rf,"erp":erp,"beta":round(b,2),"cost_of_equity":round(coe,4),
         "pretax_cost_of_debt":pcod,"after_tax_cost_of_debt":round(acod,4),
-        "debt_weight":round(dw,4),"equity_weight":round(ew,4),"wacc":round(cw,4)},
+        "debt_weight":round(dw,4),"equity_weight":round(ew,4),"wacc":round(cw,4),
+        "_math":wacc_math},
     "projected_ufcf":projs,
     "output":{"pv_fcfs":round(pv_f,0),"pv_terminal":round(pvt,0),
         "terminal_pct_of_total":round(pvt/iev if iev else 0,4),
         "implied_ev":round(iev,0),"net_debt":round(nd,0),"cash":round(cash,0),
         "implied_equity_value":round(ieq,0),"shares":round(sh,0),
-        "implied_price":round(ip,2),"current_price":0,"upside_pct":0},
-    "sensitivity":{"wacc_values":wv,"growth_values":gv,"matrix":np.round(ipm,2).tolist()}}
+        "implied_price":round(ip,2),"current_price":0,"upside_pct":0,
+        "_math":output_math},
+    "sensitivity":{"wacc_values":wv,"growth_values":gv,"matrix":np.round(ipm,2).tolist(),
+        "_math":sens_math}}
 
 
 def _build_comps(p: dict, a: _Anchors, sh: float, sig: dict, isd: List[dict]) -> dict:
@@ -535,6 +678,21 @@ def _build_capital_efficiency(isd: list[dict], cfd: list[dict], p: dict) -> dict
     rg = latest_is.get("yoy_growth", p["rg"])
     rd_roi = round(rg / rd_intensity, 2) if rd_intensity else 0
 
+    math = {
+        "rd_intensity": _m("R&D Intensity", "R&D Expense / Revenue", [
+            ("R&D Expense", round(rd, 0), "millions"), ("Revenue", round(rev, 0), "millions")],
+            ("R&D Intensity", rd_intensity, "pct")),
+        "capex_intensity": _m("CapEx Intensity", "CapEx / Revenue", [
+            ("CapEx", round(capex_abs, 0), "millions"), ("Revenue", round(rev, 0), "millions")],
+            ("CapEx Intensity", capex_intensity, "pct")),
+        "rd_to_capex": _m("R&D / CapEx", "R&D Expense / CapEx", [
+            ("R&D Expense", round(rd, 0), "millions"), ("CapEx", round(capex_abs, 0), "millions")],
+            ("R&D/CapEx", rd_to_capex, "x")),
+        "rd_roi_proxy": _m("R&D ROI Proxy", "Revenue Growth / R&D Intensity", [
+            ("Revenue Growth", round(rg, 4), "pct"), ("R&D Intensity", rd_intensity, "pct")],
+            ("R&D ROI Proxy", rd_roi, "x"),
+            "Higher = more revenue growth per unit of R&D spend"),
+    }
     return {
         "rd_intensity": rd_intensity,
         "capex_intensity": capex_intensity,
@@ -543,6 +701,7 @@ def _build_capital_efficiency(isd: list[dict], cfd: list[dict], p: dict) -> dict
         "rd_expense": round(rd, 0),
         "capex": round(capex_abs, 0),
         "revenue": round(rev, 0),
+        "_math": math,
     }
 
 
@@ -562,6 +721,11 @@ def generate_mock_report(signal: dict) -> dict:
     cfd = _build_cf(p, anc, sh, isd); dcf = _build_dcf(p, anc, sh, isd, act, price)
     comps = _build_comps(p, anc, sh, signal, isd)
     dp = dcf["output"]["implied_price"]
+    # Override mock DCF with real screener intrinsic value when available
+    real_iv = signal.get("intrinsic_value_per_share") or signal.get("take_profit")
+    if real_iv and real_iv > 0 and real_iv != price:
+        dp = real_iv
+        dcf["output"]["implied_price"] = round(dp, 2)
     dcf["output"]["current_price"] = price
     dcf["output"]["upside_pct"] = round(dp/price-1, 4) if price else 0
     cp = [iv["implied_price"] for iv in comps["implied_valuation"] if iv["implied_price"] > 0]
@@ -594,21 +758,86 @@ def generate_mock_report(signal: dict) -> dict:
     i0, b0 = isd[-1], bsd[-1]
     te, ta = b0["total_equity"], b0["total_assets"]
     rv, cg, inv, recv, ap_ = i0["revenue"], i0["cogs"], b0["inventory"], b0["receivables"], b0["accounts_payable"]
-    cap = {"net_debt":round(nd,0),
-        "net_debt_ebitda":round(nd/i0["ebitda"] if i0["ebitda"] else 0,2),
-        "debt_to_equity":round((b0["long_term_debt"]+b0["short_term_debt"])/te if te else 0,2),
-        "interest_coverage":round(i0["operating_income"]/i0["interest_expense"] if i0["interest_expense"] else 0,2),
-        "current_ratio":round(b0["total_current_assets"]/b0["total_current_liabilities"] if b0["total_current_liabilities"] else 0,2),
-        "quick_ratio":round((b0["cash"]+b0["receivables"])/b0["total_current_liabilities"] if b0["total_current_liabilities"] else 0,2)}
-    prof = {"roe":round(i0["net_income"]/te if te else 0,4),
-        "roa":round(i0["net_income"]/ta if ta else 0,4),"roic":round(p["roic"],4),
-        "asset_turnover":round(rv/ta if ta else 0,4),
-        "inventory_turnover":round(cg/inv if inv else 0,2),
-        "dso":round(recv/rv*365 if rv else 0,1),
-        "dpo":round(ap_/cg*365 if cg else 0,1),
-        "cash_conversion_cycle":round((recv/rv*365+inv/cg*365-ap_/cg*365) if rv and cg else 0,1)}
+    nde = round(nd / i0["ebitda"] if i0["ebitda"] else 0, 2)
+    dte = round((b0["long_term_debt"] + b0["short_term_debt"]) / te if te else 0, 2)
+    icov = round(i0["operating_income"] / i0["interest_expense"] if i0["interest_expense"] else 0, 2)
+    cr = round(b0["total_current_assets"] / b0["total_current_liabilities"] if b0["total_current_liabilities"] else 0, 2)
+    qr = round((b0["cash"] + b0["receivables"]) / b0["total_current_liabilities"] if b0["total_current_liabilities"] else 0, 2)
+    cap_math = {
+        "net_debt": _m("Net Debt", "Long-Term Debt + Short-Term Debt - Cash", [
+            ("LT Debt", b0["long_term_debt"], "millions"), ("ST Debt", b0["short_term_debt"], "millions"),
+            ("Cash", b0["cash"], "millions")],
+            ("Net Debt", round(nd, 0), "millions")),
+        "net_debt_ebitda": _m("Net Debt / EBITDA", "Net Debt / EBITDA", [
+            ("Net Debt", round(nd, 0), "millions"), ("EBITDA", i0["ebitda"], "millions")],
+            ("ND/EBITDA", nde, "x")),
+        "debt_to_equity": _m("Debt / Equity", "(LT Debt + ST Debt) / Total Equity", [
+            ("Total Debt", b0["long_term_debt"] + b0["short_term_debt"], "millions"),
+            ("Total Equity", te, "millions")],
+            ("D/E", dte, "x")),
+        "interest_coverage": _m("Interest Coverage", "Operating Income / Interest Expense", [
+            ("Operating Income", i0["operating_income"], "millions"),
+            ("Interest Expense", i0["interest_expense"], "millions")],
+            ("Interest Coverage", icov, "x")),
+        "current_ratio": _m("Current Ratio", "Current Assets / Current Liabilities", [
+            ("Current Assets", b0["total_current_assets"], "millions"),
+            ("Current Liabilities", b0["total_current_liabilities"], "millions")],
+            ("Current Ratio", cr, "x")),
+        "quick_ratio": _m("Quick Ratio", "(Cash + Receivables) / Current Liabilities", [
+            ("Cash", b0["cash"], "millions"), ("Receivables", b0["receivables"], "millions"),
+            ("Current Liabilities", b0["total_current_liabilities"], "millions")],
+            ("Quick Ratio", qr, "x")),
+    }
+    cap = {"net_debt":round(nd,0),"net_debt_ebitda":nde,"debt_to_equity":dte,
+        "interest_coverage":icov,"current_ratio":cr,"quick_ratio":qr,"_math":cap_math}
+    _roe = round(i0["net_income"] / te if te else 0, 4)
+    _roa = round(i0["net_income"] / ta if ta else 0, 4)
+    _at = round(rv / ta if ta else 0, 4)
+    _it = round(cg / inv if inv else 0, 2)
+    _dso = round(recv / rv * 365 if rv else 0, 1)
+    _dpo = round(ap_ / cg * 365 if cg else 0, 1)
+    _dio = round(inv / cg * 365 if cg else 0, 1)
+    _ccc = round((_dso + _dio - _dpo) if rv and cg else 0, 1)
+    prof_math = {
+        "roe": _m("Return on Equity", "Net Income / Total Equity", [
+            ("Net Income", i0["net_income"], "millions"), ("Total Equity", te, "millions")],
+            ("ROE", _roe, "pct")),
+        "roa": _m("Return on Assets", "Net Income / Total Assets", [
+            ("Net Income", i0["net_income"], "millions"), ("Total Assets", ta, "millions")],
+            ("ROA", _roa, "pct")),
+        "roic": _m("Return on Invested Capital", "Source: anchor or WACC + spread", [
+            ("WACC", p["wacc"], "pct"), ("ROIC-WACC Spread", round(p["roic"] - p["wacc"], 4), "pct")],
+            ("ROIC", round(p["roic"], 4), "pct"),
+            "ROIC from signal anchor or derived from Piotroski score"),
+        "asset_turnover": _m("Asset Turnover", "Revenue / Total Assets", [
+            ("Revenue", rv, "millions"), ("Total Assets", ta, "millions")],
+            ("Asset Turnover", _at, "x")),
+        "inventory_turnover": _m("Inventory Turnover", "COGS / Inventory", [
+            ("COGS", cg, "millions"), ("Inventory", inv, "millions")],
+            ("Inventory Turnover", _it, "x")),
+        "dso": _m("Days Sales Outstanding", "Receivables / Revenue x 365", [
+            ("Receivables", recv, "millions"), ("Revenue", rv, "millions")],
+            ("DSO", _dso, "raw")),
+        "dpo": _m("Days Payable Outstanding", "Accounts Payable / COGS x 365", [
+            ("Accounts Payable", ap_, "millions"), ("COGS", cg, "millions")],
+            ("DPO", _dpo, "raw")),
+        "cash_conversion_cycle": _m("Cash Conversion Cycle", "DSO + DIO - DPO", [
+            ("DSO", _dso, "raw"), ("DIO", _dio, "raw"), ("DPO", _dpo, "raw")],
+            ("CCC", _ccc, "raw"), "Lower is better — measures days to convert inventory to cash"),
+    }
+    prof = {"roe":_roe,"roa":_roa,"roic":round(p["roic"],4),"asset_turnover":_at,
+        "inventory_turnover":_it,"dso":_dso,"dpo":_dpo,"cash_conversion_cycle":_ccc,
+        "_math":prof_math}
     # ── Section summaries ──────────────────────────────────────
     _fmt_m = lambda v: f"${v/1e6:.0f}M" if abs(v) < 1e9 else f"${v/1e9:.1f}B"
+    snap_math = {
+        "enterprise_value": _m("Enterprise Value", "Market Cap + Net Debt", [
+            ("Market Cap", round(mc, 0), "millions"), ("Net Debt", round(nd, 0), "millions")],
+            ("Enterprise Value", round(ev, 0), "millions")),
+        "shares_outstanding": _m("Shares Outstanding", "Market Cap / Share Price", [
+            ("Market Cap", round(mc, 0), "millions"), ("Share Price", price, "usd")],
+            ("Shares", round(sh, 0), "raw")),
+    }
     snap = {"market_cap":round(mc,0),"enterprise_value":round(ev,0),
         "shares_outstanding":round(sh,0),
         "range_52w_low":round(price*random.uniform(.65,.85),2),
@@ -616,7 +845,8 @@ def generate_mock_report(signal: dict) -> dict:
         "avg_volume_3m":round(sh*random.uniform(.008,.02),0),
         "dividend_yield":round(p["div"],4),"beta":round(p["beta"],2),
         "short_interest_pct":round(anc.short_interest or random.uniform(.02,.06),4),
-        "rsi_14":round(anc.rsi or _default_rsi(act, conf), 1)}
+        "rsi_14":round(anc.rsi or _default_rsi(act, conf), 1),
+        "_math":snap_math}
     iv_prices = [iv["implied_price"] for iv in comps["implied_valuation"] if iv["implied_price"] > 0]
     iv_avg = sum(iv_prices)/len(iv_prices) if iv_prices else ca
     iv_gap = round((iv_avg/price - 1)*100, 1) if price else 0
@@ -656,8 +886,8 @@ def generate_mock_report(signal: dict) -> dict:
     return {
         "header":{"ticker":signal["ticker"],"name":signal.get("short_name",""),"sector":sec,
             "industry":sec,"exchange":"NASDAQ","date":datetime.now().strftime("%Y-%m-%d"),
-            "rating":rat,"price_target":round(bl,2),"current_price":price,"upside_pct":round(up,4)},
-        "thesis":{"text":f"{rat} with ${bl:.2f} price target ({up:+.1%} upside). "
+            "rating":rat,"price_target":round(dp,2),"current_price":price,"upside_pct":round(dp/price-1,4) if price else 0},
+        "thesis":{"text":f"{rat} with ${dp:.2f} price target ({dp/price-1:+.1%} upside). "
                          f"{signal.get('ml_insight','')} "
                          f"Trading at {p['ev_rev']:.1f}x EV/Revenue vs "
                          f"{comps['peer_median']['ev_revenue']:.1f}x peer median suggests "
@@ -677,7 +907,12 @@ def generate_mock_report(signal: dict) -> dict:
                 "Management credibility deteriorates or guidance is cut"]},
         "price_target":{"dcf_weight":0.50,"dcf_value":round(dp,2),"comps_weight":0.30,
             "comps_value":round(ca,2),"technical_weight":0.20,"technical_value":round(tt,2),
-            "blended":round(bl,2)},
+            "blended":round(bl,2),
+            "_math":{"blended":_m("Blended Price Target","DCF x 50% + Comps x 30% + Technical x 20%",[
+                ("DCF Implied",round(dp,2),"usd"),("DCF Weight",0.50,"pct"),
+                ("Comps Implied",round(ca,2),"usd"),("Comps Weight",0.30,"pct"),
+                ("Technical",round(tt,2),"usd"),("Technical Weight",0.20,"pct")],
+                ("Blended Target",round(bl,2),"usd"))}},
         "verdict":{"rating":rat,"price_target":round(bl,2),"confidence":round(conf,4),
             "summary":f"{rat} with {bl:.2f} price target ({up:+.1%} upside). {signal.get('ml_insight','')}"},
         "capital_efficiency": _capeff,

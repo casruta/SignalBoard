@@ -41,7 +41,7 @@ def fetch_fundamentals(ticker: str, force_refresh: bool = False) -> dict:
 
     # Save as single-row DataFrame for Parquet compat
     df = pd.DataFrame([data])
-    df.attrs["fetched_at"] = pd.Timestamp.now()
+    df.attrs["fetched_at"] = str(pd.Timestamp.now())
     cache.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(cache)
 
@@ -103,6 +103,10 @@ def _extract(info: dict) -> dict:
         "industry": _get("industry", "Unknown"),
         "market_cap": _get("marketCap"),
         "short_name": _get("shortName", ""),
+        "current_price": _get("currentPrice"),
+        "shares_outstanding": _get("sharesOutstanding"),
+        "implied_shares_outstanding": _get("impliedSharesOutstanding"),
+        "enterprise_value": _get("enterpriseValue"),
     }
 
 

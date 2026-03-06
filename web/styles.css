@@ -93,6 +93,8 @@ body[data-page="list"] {
   text-decoration: none;
   color: inherit;
   transition: opacity 0.3s ease;
+  flex: 1;
+  min-width: 0;
 }
 
 .ticker-row:hover {
@@ -1242,6 +1244,16 @@ body[data-page="detail"] {
 .verdict-rating.sell       { color: var(--red); }
 .verdict-rating.strong-sell { color: var(--red); }
 
+.verdict-upside {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.8rem;
+  font-weight: 500;
+  margin: 8px 0;
+}
+
+.verdict-upside.positive { color: var(--green); }
+.verdict-upside.negative { color: var(--red); }
+
 .verdict-target {
   font-family: 'JetBrains Mono', monospace;
   font-size: 1.3rem;
@@ -1594,6 +1606,227 @@ td.explainable.active {
   padding-top: 10px;
   border-top: 1px solid rgba(212, 208, 200, 0.4);
   font-style: italic;
+}
+
+/* ── Math breakdown (clickable values) ─────────────────── */
+
+td.has-math,
+.snapshot-value.has-math {
+  cursor: pointer;
+  position: relative;
+}
+
+td.has-math:hover,
+.snapshot-value.has-math:hover {
+  background: rgba(26, 26, 26, 0.04);
+}
+
+td.has-math.active,
+.snapshot-value.has-math.active {
+  background: rgba(26, 26, 26, 0.06);
+}
+
+.math-divider {
+  border: none;
+  border-top: 1px solid var(--rule);
+  margin: 14px 0;
+}
+
+.math-breakdown {
+  margin-top: 4px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.math-formula-name {
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  color: var(--fg);
+  margin-bottom: 10px;
+}
+
+.math-inputs {
+  padding: 6px 0;
+  border-top: 1px solid rgba(212, 208, 200, 0.4);
+}
+
+.math-input-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 3px 0;
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+
+.math-input-label {
+  color: var(--muted);
+}
+
+.math-input-value {
+  color: var(--fg);
+  font-weight: 400;
+  text-align: right;
+}
+
+.math-formula-expr {
+  font-size: 0.72rem;
+  color: var(--muted);
+  padding: 8px 0;
+  text-align: center;
+  font-style: italic;
+  font-family: 'EB Garamond', serif;
+  border-top: 1px dashed rgba(212, 208, 200, 0.4);
+  border-bottom: 1px dashed rgba(212, 208, 200, 0.4);
+}
+
+.math-result {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 8px 0;
+  font-size: 0.74rem;
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.math-result-label {
+  color: var(--fg);
+}
+
+.math-result-value {
+  color: var(--fg);
+}
+
+.math-note {
+  font-family: 'EB Garamond', serif;
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-style: italic;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(212, 208, 200, 0.4);
+  line-height: 1.45;
+}
+
+/* ── Report icon (list page) ─────────────────────────────── */
+
+.ticker-row-wrap {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+
+.report-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  min-width: 36px;
+  font-size: 0.75rem;
+  color: var(--muted);
+  border-left: 1px solid var(--rule);
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+}
+
+.report-icon:hover {
+  color: var(--fg);
+  border-color: var(--fg);
+  background: rgba(26, 26, 26, 0.04);
+}
+
+/* ── Investor report modal ──────────────────────────────── */
+
+.report-modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.45);
+  align-items: center;
+  justify-content: center;
+}
+
+.report-modal-overlay.open {
+  display: flex;
+}
+
+.report-modal {
+  position: relative;
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  width: min(90vw, 620px);
+  max-height: 85vh;
+  overflow-y: auto;
+  padding: 32px 28px 28px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.12);
+}
+
+.report-modal-close {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  background: none;
+  border: none;
+  font-size: 1.4rem;
+  color: var(--muted);
+  cursor: pointer;
+  line-height: 1;
+  transition: color 0.2s;
+}
+
+.report-modal-close:hover {
+  color: var(--fg);
+}
+
+.report-modal-body h1 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1rem;
+  font-weight: 500;
+  margin: 0 0 12px;
+}
+
+.report-modal-body h2 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 20px 0 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--rule);
+}
+
+.report-modal-body h3 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  font-weight: 500;
+  margin: 14px 0 6px;
+}
+
+.report-modal-body p {
+  font-size: 0.78rem;
+  line-height: 1.75;
+  margin: 0 0 8px;
+}
+
+.report-modal-body strong {
+  font-weight: 500;
+}
+
+.report-modal-body em {
+  font-style: italic;
+  color: var(--muted);
+}
+
+.report-modal-body hr {
+  border: none;
+  height: 1px;
+  background: var(--rule);
+  margin: 16px 0;
 }
 
 /* ── Report mobile overrides ─────────────────────────────── */

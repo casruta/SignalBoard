@@ -193,6 +193,7 @@ class Database:
         with self._session() as session:
             rows = (
                 session.query(ScreenedStockRow)
+                .filter(ScreenedStockRow.dcf_upside_pct > 0)
                 .order_by(ScreenedStockRow.dcf_upside_pct.desc())
                 .limit(limit)
                 .all()

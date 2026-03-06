@@ -254,8 +254,16 @@ def seed_live(db_path: str, config: dict) -> None:
     safe_df["rank"] = safe_df.index + 1
     logger.info("Found %d stocks passing safety filters", len(safe_df))
 
-    # Sanitize NaN/Inf for JSON compat
+    # Sanitize NaN/Inf/numpy types for JSON compat
     def _sanitize(obj):
+        if isinstance(obj, (np.bool_,)):
+            return bool(obj)
+        if isinstance(obj, (np.integer,)):
+            return int(obj)
+        if isinstance(obj, (np.floating,)):
+            if np.isnan(obj) or np.isinf(obj):
+                return None
+            return float(obj)
         if isinstance(obj, float) and (np.isnan(obj) or np.isinf(obj)):
             return None
         if isinstance(obj, dict):
@@ -396,7 +404,9 @@ def seed_live(db_path: str, config: dict) -> None:
         })
 
         # ── Build recommendation signal for rich report generation ──
-        dcf_upside_raw = dcf.get("dcf_upside_pct") or 0
+        dcf_upside_raw = dcf.get("dcf_upside_pct")
+        if dcf_upside_raw is None or (isinstance(dcf_upside_raw, float) and np.isnan(dcf_upside_raw)):
+            dcf_upside_raw = 0.0
         confidence = round(min(0.60 + abs(dcf_upside_raw) * 0.5, 0.95), 2)
         take_profit = round(target, 2) if target else None
         stop_loss = round(current_price * 0.92, 2) if current_price else None
@@ -472,12 +482,12 @@ def seed_live(db_path: str, config: dict) -> None:
                 f"Gross margins {gross_m*100:.0f}% — "
                 f"{'premium pricing power' if gross_m > 0.55 else 'healthy margin profile' if gross_m > 0.35 else 'typical for sector'}"
             )
-        if analyst_n is not None and analyst_n < 8:
+        if analyst_n is not None and not np.isnan(analyst_n) and analyst_n < 8:
             fund_points.append(
                 f"Under-researched: only {int(analyst_n)} analysts covering — "
                 f"pricing inefficiency creates opportunity"
             )
-        elif analyst_n is not None:
+        elif analyst_n is not None and not np.isnan(analyst_n):
             fund_points.append(f"{int(analyst_n)} analysts covering this name")
         if net_debt is not None and mkt_cap > 0:
             nd_label = f"${abs(net_debt)/1e9:.1f}B" if abs(net_debt) >= 1e9 else f"${abs(net_debt)/1e6:.0f}M"

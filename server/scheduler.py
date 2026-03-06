@@ -229,6 +229,10 @@ def _run_screener(
             "trailingEps": row.get("eps"),
             "forwardEps": row.get("forward_eps"),
             "revenueGrowth": row.get("revenue_growth"),
+            "currentPrice": row.get("current_price"),
+            "sharesOutstanding": row.get("shares_outstanding"),
+            "impliedSharesOutstanding": row.get("implied_shares_outstanding"),
+            "enterpriseValue": row.get("enterprise_value"),
         }
 
     # Get risk-free rate from macro data
