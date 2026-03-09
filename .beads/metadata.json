@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "SignalApp",
+  "project_id": "1bc9a8e6-11d8-4dfc-84e7-ae20e5a4eccb"
+}

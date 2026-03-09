@@ -58,3 +58,6 @@ Thumbs.db
 # Xcode
 ios/SignalBoard.xcodeproj/xcuserdata/
 ios/SignalBoard.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Dolt database files (added by bd init)
+.dolt/
