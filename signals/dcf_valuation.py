@@ -88,6 +88,40 @@ SECTOR_EXIT_MULTIPLES = {
     "Real Estate": 14.0, "Utilities": 10.0,
 }
 
+# ── Cyclical sectors for normalized earnings (Phase 1.3) ─────────────
+CYCLICAL_SECTORS = {"Energy", "Materials", "Industrials", "Consumer Discretionary"}
+
+# ── Multi-stage DCF growth classification (Phase 2.1) ────────────────
+# Durations for high-growth, transition, and stable stages (total = 10 years)
+GROWTH_STAGE_PARAMS = {
+    "high": {"high_years": 3, "transition_years": 4, "stable_years": 3},    # >20% growth
+    "medium": {"high_years": 2, "transition_years": 3, "stable_years": 5},  # 10-20%
+    "low": {"high_years": 0, "transition_years": 2, "stable_years": 3},     # <10%
+}
+
+# ── R&D capitalization useful life by sector (Damodaran) (Phase 2.2) ─
+RD_USEFUL_LIFE = {
+    "Technology": 5,
+    "Healthcare": 10,
+    "Communication Services": 5,
+}
+
+# ── ROIC competitive advantage half-lives by sector (Damodaran) (Phase 2.4) ─
+ROIC_HALFLIFE = {
+    "Technology": 5,
+    "Healthcare": 7,
+    "Communication Services": 5,
+    "Consumer Discretionary": 7,
+    "Consumer Staples": 10,
+    "Industrials": 10,
+    "Financial Services": 7,
+    "Financials": 7,
+    "Energy": 7,
+    "Materials": 10,
+    "Real Estate": 10,
+    "Utilities": 10,
+}
+
 
 def get_terminal_growth(
     sector: str, default: float = 0.02, risk_free_rate: float | None = None,
@@ -103,11 +137,13 @@ def compute_dcf_valuation(
     statements: dict,
     info: dict,
     risk_free_rate: float,
-    projection_years: int = 5,
+    projection_years: int = 10,
     terminal_growth: float | None = None,
     equity_risk_premium: float = 0.06,
     improving_fcf: bool = False,
     altman_z: float | None = None,
+    capitalize_rd: bool = True,
+    normalize_earnings: bool | None = None,
 ) -> dict:
     """Compute DCF intrinsic value and related valuation metrics.
 
@@ -121,6 +157,8 @@ def compute_dcf_valuation(
     projection_years : number of years to project FCF forward
     terminal_growth : long-term FCF growth rate (default 2%)
     equity_risk_premium : ERP used in CAPM (default 6%)
+    capitalize_rd : capitalize R&D for tech/pharma sectors (Damodaran)
+    normalize_earnings : use mid-cycle EBIT for cyclical sectors; None = auto-detect
 
     Returns
     -------
@@ -148,6 +186,13 @@ def compute_dcf_valuation(
         "tv_divergence_pct": np.nan,
         "distress_probability": np.nan,
         "distress_adjusted_iv": np.nan,
+        "mc_median_iv": np.nan,
+        "mc_p10_iv": np.nan,
+        "mc_p90_iv": np.nan,
+        "mc_std_iv": np.nan,
+        "rd_adjustment_ebit": 0.0,
+        "rd_asset": 0.0,
+        "normalized_ebit_used": False,
     }
 
     # Sector-dependent terminal growth — capped at risk-free rate (Damodaran)
@@ -170,18 +215,33 @@ def compute_dcf_valuation(
     wacc = compute_wacc(info, statements, risk_free_rate, equity_risk_premium)
     result["wacc"] = wacc
 
-    # --- ROIC ---
-    roic = compute_roic(statements)
+    # --- R&D capitalization (Phase 2.2) ---
+    rd_info = {"rd_adjustment_ebit": 0.0, "rd_asset": 0.0, "rd_current": 0.0}
+    if capitalize_rd and sector in RD_USEFUL_LIFE:
+        rd_info = _capitalize_rd(statements, sector)
+        result["rd_adjustment_ebit"] = rd_info["rd_adjustment_ebit"]
+        result["rd_asset"] = rd_info["rd_asset"]
+
+    # --- ROIC (with R&D adjustment when applicable) ---
+    roic = compute_roic(statements, sector=sector, rd_info=rd_info)
     result["roic"] = roic
 
     if not np.isnan(wacc) and not np.isnan(roic):
         result["roic_vs_wacc_spread"] = roic - wacc
 
+    # --- Normalized earnings for cyclical sectors (Phase 1.3) ---
+    if normalize_earnings is None:
+        normalize_earnings = sector in CYCLICAL_SECTORS
+
     # --- Base FCFF (Damodaran: EBIT(1-t) + D&A - CapEx - ΔWC) -------
     quarterly_cf = statements.get("quarterly_cashflow")
     quarterly_income = statements.get("quarterly_income")
-    base_fcf, delta_wc_estimated = _compute_fcff(statements)
+    base_fcf, delta_wc_estimated = _compute_fcff(
+        statements, normalize=normalize_earnings, sector=sector, rd_info=rd_info,
+    )
     result["delta_wc_estimated"] = delta_wc_estimated
+    if normalize_earnings and not np.isnan(base_fcf):
+        result["normalized_ebit_used"] = True
 
     # Fallback: OCF→FCFF bridge (Damodaran reconciliation).
     # OCF already reflects NOPAT + D&A - ΔWC - after-tax interest (paid to
@@ -251,8 +311,14 @@ def compute_dcf_valuation(
                         wacc, terminal_growth)
         return result
 
-    projected = project_fcf(base_fcf, revenue_growth, terminal_growth, projection_years,
-                            improving_fcf=improving_fcf)
+    projected = project_fcf_multistage(
+        base_fcf, revenue_growth, terminal_growth,
+        improving_fcf=improving_fcf,
+        roic_latest=roic if not np.isnan(roic) else None,
+        wacc=wacc,
+        sector=sector,
+    )
+    projection_years = len(projected)
 
     # --- Terminal value (Gordon Growth + exit multiple cross-check) ---
     tv = compute_terminal_value(projected[-1], terminal_growth, wacc)
@@ -295,8 +361,19 @@ def compute_dcf_valuation(
 
         if not np.isnan(market_price) and market_price > 0:
             result["current_price"] = market_price
-            result["margin_of_safety"] = (intrinsic - market_price) / intrinsic
-            result["dcf_upside_pct"] = intrinsic / market_price - 1
+            if intrinsic > 0:
+                result["margin_of_safety"] = (intrinsic - market_price) / intrinsic
+                result["dcf_upside_pct"] = intrinsic / market_price - 1
+            else:
+                # Intrinsic value <= 0 means equity is worthless (high debt);
+                # margin of safety is undefined, upside is -100%.
+                logger.warning(
+                    "Intrinsic value per share is non-positive (%.2f); "
+                    "margin of safety undefined",
+                    intrinsic,
+                )
+                result["margin_of_safety"] = -1.0
+                result["dcf_upside_pct"] = -1.0
 
         # --- Distress probability discount (Damodaran) ---
         if altman_z is not None and not np.isnan(altman_z):
@@ -312,12 +389,24 @@ def compute_dcf_valuation(
             else:
                 result["distress_adjusted_iv"] = intrinsic
 
-        # --- Scenario analysis (bear / base / bull) ---
-        scenarios = _compute_scenarios(
+        # --- Monte Carlo terminal value sensitivity (Phase 2.3) ---
+        mc_results = _monte_carlo_dcf(
             base_fcf, wacc, revenue_growth, terminal_growth,
-            projection_years, net_debt, shares_outstanding, improving_fcf,
+            projection_years, net_debt, shares_outstanding,
+            improving_fcf=improving_fcf,
+            roic_latest=roic if not np.isnan(roic) else None,
+            sector=sector,
         )
-        result.update(scenarios)
+        if mc_results:
+            result.update(mc_results)
+            result["bear_iv"] = mc_results.get("mc_p10_iv", np.nan)
+            result["bull_iv"] = mc_results.get("mc_p90_iv", np.nan)
+            mc_median = mc_results.get("mc_median_iv", np.nan)
+            if not np.isnan(mc_median) and mc_median > 0:
+                p10 = mc_results.get("mc_p10_iv", np.nan)
+                p90 = mc_results.get("mc_p90_iv", np.nan)
+                if not np.isnan(p10) and not np.isnan(p90):
+                    result["scenario_range_pct"] = (p90 - p10) / mc_median
     else:
         logger.warning("Shares outstanding unavailable; cannot compute per-share intrinsic value")
 
@@ -408,11 +497,18 @@ def compute_wacc(
     return wacc
 
 
-def compute_roic(statements: dict) -> float:
+def compute_roic(
+    statements: dict,
+    sector: str = "",
+    rd_info: dict | None = None,
+) -> float:
     """ROIC = NOPAT / Invested Capital.
 
     NOPAT = Operating Income * (1 - tax_rate)
     Invested Capital = Total Equity + Total Debt - Cash
+
+    When R&D capitalization is active (rd_info provided), NOPAT is adjusted
+    by adding rd_adjustment_ebit*(1-tax), and invested_capital gains rd_asset.
 
     Tax rate note (Damodaran): Uses *effective* tax rate for NOPAT (reflects
     actual taxes paid), while ``compute_wacc`` uses *marginal* tax rate (25%)
@@ -439,7 +535,12 @@ def compute_roic(statements: dict) -> float:
         if pretax > 0:
             tax_rate = np.clip(tax_provision / pretax, 0.0, 0.5)
 
-    nopat = operating_income * (1 - tax_rate)
+    # R&D capitalization adjustment (Phase 2.2)
+    adjusted_ebit = operating_income
+    if rd_info is not None and rd_info.get("rd_adjustment_ebit", 0.0) != 0.0:
+        adjusted_ebit += rd_info["rd_adjustment_ebit"]
+
+    nopat = adjusted_ebit * (1 - tax_rate)
 
     # Invested capital: Equity + Total Debt (LT + ST) - Cash  (Damodaran)
     total_equity = _get_balance_sheet_item(statements, "Stockholders Equity")
@@ -453,6 +554,10 @@ def compute_roic(statements: dict) -> float:
     invested_capital = total_equity + total_debt
     if not np.isnan(cash):
         invested_capital -= cash
+
+    # Add unamortized R&D asset to invested capital (Phase 2.2)
+    if rd_info is not None and rd_info.get("rd_asset", 0.0) > 0:
+        invested_capital += rd_info["rd_asset"]
 
     if invested_capital <= 0:
         logger.warning("Invested capital is non-positive (%.2f); cannot compute ROIC", invested_capital)
@@ -493,6 +598,70 @@ def project_fcf(
             fraction = yr / (years - 1)
             convex_fraction = 1 - (1 - fraction) ** 2
             growth = revenue_growth_rate + convex_fraction * (terminal_growth - revenue_growth_rate)
+
+        current_fcf = current_fcf * (1 + growth)
+        current_fcf = min(current_fcf, cap)
+        projected.append(current_fcf)
+
+    return projected
+
+
+def project_fcf_multistage(
+    base_fcf: float,
+    revenue_growth_rate: float,
+    terminal_growth: float = 0.02,
+    improving_fcf: bool = False,
+    roic_latest: float | None = None,
+    wacc: float | None = None,
+    sector: str = "",
+) -> list[float]:
+    """Project FCF using a 3-stage model (Damodaran high-growth firm valuation).
+
+    Stage 1 (High growth): Revenue growth rate with minimal decay
+    Stage 2 (Transition): Linear fade from high growth to stable growth
+    Stage 3 (Stable): Terminal growth rate
+
+    Total projection is 10 years.
+    """
+    abs_growth = abs(revenue_growth_rate)
+    if abs_growth > 0.20:
+        params = GROWTH_STAGE_PARAMS["high"]
+    elif abs_growth > 0.10:
+        params = GROWTH_STAGE_PARAMS["medium"]
+    else:
+        params = GROWTH_STAGE_PARAMS["low"]
+
+    high_years = params["high_years"]
+    transition_years = params["transition_years"]
+    stable_years = params["stable_years"]
+    total_years = high_years + transition_years + stable_years
+
+    cap_multiplier = 3.0 if improving_fcf else 2.5
+    cap = cap_multiplier * abs(base_fcf)
+
+    projected = []
+    current_fcf = base_fcf
+
+    for yr in range(total_years):
+        if yr < high_years:
+            # Stage 1: High growth with minimal 5% annual decay
+            decay = 0.95 ** yr
+            growth = revenue_growth_rate * decay
+        elif yr < high_years + transition_years:
+            # Stage 2: Linear fade from last high-growth rate to terminal
+            t_yr = yr - high_years
+            t_fraction = t_yr / max(transition_years - 1, 1)
+            last_high_growth = revenue_growth_rate * (0.95 ** max(high_years - 1, 0))
+            growth = last_high_growth + t_fraction * (terminal_growth - last_high_growth)
+        else:
+            # Stage 3: Stable growth
+            growth = terminal_growth
+
+        # Apply ROIC mean reversion if available (Phase 2.4)
+        if roic_latest is not None and wacc is not None:
+            growth = _apply_roic_mean_reversion(
+                growth, roic_latest, wacc, yr, sector
+            )
 
         current_fcf = current_fcf * (1 + growth)
         current_fcf = min(current_fcf, cap)
@@ -713,13 +882,23 @@ def _synthetic_cost_of_debt(
     return risk_free_rate + 0.12  # D-rated / distressed
 
 
-def _compute_fcff(statements: dict) -> tuple[float, bool]:
+def _compute_fcff(
+    statements: dict,
+    normalize: bool = False,
+    sector: str = "",
+    rd_info: dict | None = None,
+) -> tuple[float, bool]:
     """Compute FCFF = EBIT(1-t) + D&A - CapEx - ΔWC (Damodaran).
 
     Returns (fcff, delta_wc_estimated) where delta_wc_estimated is True
     when Change In Working Capital data is missing and defaults to 0.
     For growth companies, missing ΔWC inflates FCFF because working capital
     investment (inventory build, receivables growth) is ignored.
+
+    When normalize=True, uses mid-cycle EBIT (5-year median margin × TTM revenue)
+    instead of raw TTM EBIT — appropriate for cyclical sectors.
+
+    When rd_info is provided, applies R&D capitalization adjustment to EBIT.
     """
     quarterly_income = statements.get("quarterly_income")
     quarterly_cf = statements.get("quarterly_cashflow")
@@ -729,9 +908,21 @@ def _compute_fcff(statements: dict) -> tuple[float, bool]:
     if quarterly_cf is None or quarterly_cf.empty:
         return np.nan, False
 
-    ebit = _trailing_4q_sum(quarterly_income, "Operating Income")
+    # Use normalized EBIT for cyclical sectors (Phase 1.3)
+    if normalize:
+        ebit = _compute_normalized_ebit(statements)
+        if np.isnan(ebit):
+            # Fallback to raw TTM EBIT if normalization fails
+            ebit = _trailing_4q_sum(quarterly_income, "Operating Income")
+    else:
+        ebit = _trailing_4q_sum(quarterly_income, "Operating Income")
+
     if np.isnan(ebit):
         return np.nan, False
+
+    # R&D capitalization adjustment (Phase 2.2)
+    if rd_info is not None and rd_info.get("rd_adjustment_ebit", 0.0) != 0.0:
+        ebit += rd_info["rd_adjustment_ebit"]
 
     da = _trailing_4q_sum(quarterly_cf, "Depreciation And Amortization")
     capex = _trailing_4q_sum(quarterly_cf, "Capital Expenditure")
@@ -866,3 +1057,219 @@ def _compute_scenarios(
             result["scenario_range_pct"] = (bull - bear) / mid
 
     return result
+
+
+# ── Phase 1.3: Normalized earnings for cyclical companies ────────────
+
+def _compute_normalized_ebit(statements: dict) -> float:
+    """Compute mid-cycle EBIT using 5-year median operating margin applied to TTM revenue."""
+    annual_income = statements.get("annual_income")
+    if annual_income is None or annual_income.empty:
+        return np.nan
+
+    if "Operating Income" not in annual_income.index or "Total Revenue" not in annual_income.index:
+        return np.nan
+
+    op_income_row = annual_income.loc["Operating Income"].dropna()
+    revenue_row = annual_income.loc["Total Revenue"].dropna()
+
+    # Need at least 3 years for meaningful median
+    n = min(len(op_income_row), len(revenue_row))
+    if n < 3:
+        return np.nan
+
+    margins = []
+    for i in range(min(n, 5)):
+        rev = float(revenue_row.iloc[i])
+        oi = float(op_income_row.iloc[i])
+        if rev > 0:
+            margins.append(oi / rev)
+
+    if not margins:
+        return np.nan
+
+    median_margin = float(np.median(margins))
+
+    # Apply median margin to TTM revenue
+    quarterly_income = statements.get("quarterly_income")
+    if quarterly_income is not None and not quarterly_income.empty:
+        ttm_revenue = _trailing_4q_sum(quarterly_income, "Total Revenue")
+        if not np.isnan(ttm_revenue) and ttm_revenue > 0:
+            return ttm_revenue * median_margin
+
+    # Fallback to most recent annual revenue
+    latest_rev = float(revenue_row.iloc[0])
+    if latest_rev > 0:
+        return latest_rev * median_margin
+
+    return np.nan
+
+
+# ── Phase 2.2: R&D capitalization for tech/pharma ────────────────────
+
+def _capitalize_rd(statements: dict, sector: str) -> dict:
+    """Capitalize R&D following Damodaran methodology.
+
+    Returns dict with:
+    - rd_adjustment_ebit: amount to add to EBIT (current R&D - amortization)
+    - rd_asset: unamortized R&D asset to add to invested capital
+    - rd_current: current year R&D expense
+    """
+    result = {"rd_adjustment_ebit": 0.0, "rd_asset": 0.0, "rd_current": 0.0}
+
+    useful_life = RD_USEFUL_LIFE.get(sector)
+    if useful_life is None:
+        return result
+
+    annual_income = statements.get("annual_income")
+    if annual_income is None or annual_income.empty:
+        return result
+
+    # Try "Research And Development" or "Research Development" line items
+    rd_row_name = None
+    for name in ["Research And Development", "Research Development"]:
+        if name in annual_income.index:
+            rd_row_name = name
+            break
+
+    if rd_row_name is None:
+        return result
+
+    rd_row = annual_income.loc[rd_row_name].dropna()
+    if len(rd_row) == 0:
+        return result
+
+    current_rd = abs(float(rd_row.iloc[0]))
+    result["rd_current"] = current_rd
+
+    # Amortize past R&D over useful life using straight-line
+    rd_values = [abs(float(rd_row.iloc[i])) for i in range(min(len(rd_row), useful_life))]
+
+    total_amortization = 0.0
+    unamortized_asset = 0.0
+
+    for age, rd in enumerate(rd_values):
+        if age == 0:
+            # Current year R&D: add back to EBIT entirely
+            continue
+
+        # Fraction still unamortized
+        remaining_life = useful_life - age
+        if remaining_life > 0:
+            annual_amort = rd / useful_life
+            total_amortization += annual_amort
+            unamortized_asset += rd * (remaining_life / useful_life)
+
+    # EBIT adjustment: +current R&D (add back expense), -amortization
+    result["rd_adjustment_ebit"] = current_rd - total_amortization
+    result["rd_asset"] = unamortized_asset
+
+    return result
+
+
+# ── Phase 2.3: Monte Carlo terminal value sensitivity ────────────────
+
+def _monte_carlo_dcf(
+    base_fcf: float,
+    wacc: float,
+    revenue_growth: float,
+    terminal_growth: float,
+    projection_years: int,
+    net_debt: float,
+    shares_outstanding: float,
+    improving_fcf: bool = False,
+    n_simulations: int = 1000,
+    roic_latest: float | None = None,
+    sector: str = "",
+) -> dict:
+    """Monte Carlo simulation varying WACC, terminal growth, and revenue growth.
+
+    Returns dict with:
+    - mc_median_iv: median intrinsic value
+    - mc_p10_iv: 10th percentile (conservative)
+    - mc_p90_iv: 90th percentile (optimistic)
+    - mc_std_iv: standard deviation of IV estimates
+    """
+    rng = np.random.default_rng(42)  # reproducible
+
+    # Parameter distributions
+    wacc_samples = rng.normal(wacc, 0.01, n_simulations)  # std=1%
+    tg_samples = rng.uniform(
+        max(0.005, terminal_growth - 0.01),
+        min(wacc - 0.01, terminal_growth + 0.01),
+        n_simulations,
+    )
+    # Triangular: bear=0.5x, base=1x, bull=1.3x
+    growth_multipliers = rng.triangular(0.5, 1.0, 1.3, n_simulations)
+
+    ivs = []
+    for i in range(n_simulations):
+        w = float(np.clip(wacc_samples[i], 0.04, 0.30))
+        tg = float(tg_samples[i])
+        g = revenue_growth * growth_multipliers[i]
+
+        if w <= tg:
+            continue
+
+        projected = project_fcf_multistage(
+            base_fcf, g, tg, improving_fcf=improving_fcf,
+            roic_latest=roic_latest, wacc=w, sector=sector,
+        )
+        if not projected:
+            continue
+
+        n_years = len(projected)
+        tv = compute_terminal_value(projected[-1], tg, w)
+        pv_fcfs = sum(fcf / (1 + w) ** yr for yr, fcf in enumerate(projected, start=1))
+        pv_tv = tv / (1 + w) ** n_years
+        ev = pv_fcfs + pv_tv
+        equity = ev - net_debt
+
+        if shares_outstanding > 0:
+            ivs.append(equity / shares_outstanding)
+
+    if not ivs:
+        return {}
+
+    iv_arr = np.array(ivs)
+    result = {
+        "mc_median_iv": float(np.median(iv_arr)),
+        "mc_p10_iv": float(np.percentile(iv_arr, 10)),
+        "mc_p90_iv": float(np.percentile(iv_arr, 90)),
+        "mc_std_iv": float(np.std(iv_arr)),
+    }
+
+    return result
+
+
+# ── Phase 2.4: ROIC mean reversion ──────────────────────────────────
+
+def _apply_roic_mean_reversion(
+    growth_rate: float,
+    roic_latest: float,
+    wacc: float,
+    year: int,
+    sector: str,
+) -> float:
+    """Fade growth rate as ROIC converges toward WACC+2% over time.
+
+    High ROIC attracts competition; the reinvestment rate should decrease
+    as excess returns decay. Growth = reinvestment_rate * ROIC, so as ROIC
+    fades, achievable growth fades proportionally.
+    """
+    target_roic = wacc + 0.02  # long-run sustainable ROIC
+    if roic_latest <= target_roic:
+        return growth_rate  # already at or below equilibrium
+
+    halflife = ROIC_HALFLIFE.get(sector, 7)
+    decay = 0.5 ** (year / halflife)
+
+    # ROIC at this projection year
+    projected_roic = target_roic + (roic_latest - target_roic) * decay
+
+    # Scale growth rate by ratio of projected vs current ROIC
+    if roic_latest > 0:
+        roic_ratio = projected_roic / roic_latest
+        return growth_rate * roic_ratio
+
+    return growth_rate

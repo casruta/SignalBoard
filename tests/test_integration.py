@@ -35,9 +35,21 @@ class TestIntegration:
         assert len(fm.columns) > 30
         assert len(fm) > 100
 
-        # Network features should be present
+        # Default "value" feature_set excludes network features
         net_cols = [c for c in fm.columns if c.startswith("net_")]
-        assert len(net_cols) > 0, "Network features not integrated"
+        assert len(net_cols) == 0, "Network features should not be in value feature set"
+
+    def test_signal_combiner_full_feature_set(self, pipeline_data):
+        config, prices, fundamentals, macro = pipeline_data
+        from signals.combiner import SignalCombiner
+
+        combiner = SignalCombiner()
+        fm = combiner.build_feature_matrix(prices, fundamentals, macro, feature_set="full")
+
+        assert isinstance(fm.index, pd.MultiIndex)
+        # Network features should be present in full mode
+        net_cols = [c for c in fm.columns if c.startswith("net_")]
+        assert len(net_cols) > 0, "Network features not integrated in full mode"
 
     def test_feature_engineering_pipeline(self, pipeline_data):
         config, prices, fundamentals, macro = pipeline_data

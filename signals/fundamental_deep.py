@@ -777,7 +777,107 @@ def compute_industry_relative_metrics(
     else:
         feats["industry_fundamental_rank"] = np.nan
 
+    # ── Peer-relative valuation Z-scores ──────────────────────────────
+    _ZSCORE_METRICS = [
+        ("peer_ev_ebitda_zscore", "ev_to_ebitda"),
+        ("peer_p_fcf_zscore", "price_to_fcf"),
+        ("peer_ev_revenue_zscore", "ev_to_revenue"),
+    ]
+
+    zscore_values: list[float] = []
+    for zscore_name, metric_key in _ZSCORE_METRICS:
+        my_val = ticker_fundamentals.get(metric_key)
+        # For P/FCF, fall back to inverting fcf_yield when price_to_fcf is absent
+        if metric_key == "price_to_fcf" and (
+            my_val is None or (isinstance(my_val, float) and np.isnan(my_val))
+        ):
+            fcf_yield = ticker_fundamentals.get("fcf_yield")
+            if fcf_yield is not None and isinstance(fcf_yield, float) and not np.isnan(fcf_yield) and fcf_yield != 0.0:
+                my_val = 1.0 / fcf_yield
+
+        if my_val is None or (isinstance(my_val, float) and np.isnan(my_val)):
+            feats[zscore_name] = np.nan
+            continue
+
+        # Collect peer values for this metric
+        peer_metric_vals: list[float] = []
+        for p in peers:
+            v = all_fundamentals[p].get(metric_key)
+            # Same fcf_yield fallback for peers
+            if metric_key == "price_to_fcf" and (
+                v is None or (isinstance(v, float) and np.isnan(v))
+            ):
+                peer_fcf_yield = all_fundamentals[p].get("fcf_yield")
+                if peer_fcf_yield is not None and isinstance(peer_fcf_yield, float) and not np.isnan(peer_fcf_yield) and peer_fcf_yield != 0.0:
+                    v = 1.0 / peer_fcf_yield
+            if v is not None and not (isinstance(v, float) and np.isnan(v)):
+                peer_metric_vals.append(float(v))
+
+        if len(peer_metric_vals) < 3:
+            feats[zscore_name] = np.nan
+            continue
+
+        peer_mean = float(np.mean(peer_metric_vals))
+        peer_std = float(np.std(peer_metric_vals))
+        if peer_std == 0.0:
+            feats[zscore_name] = 0.0
+        else:
+            z = (float(my_val) - peer_mean) / peer_std
+            feats[zscore_name] = float(z) if np.isfinite(z) else np.nan
+
+        if not np.isnan(feats[zscore_name]):
+            zscore_values.append(feats[zscore_name])
+
+    # Composite: average of available Z-scores (lower = cheaper vs peers)
+    if zscore_values:
+        feats["peer_valuation_composite_zscore"] = float(np.mean(zscore_values))
+    else:
+        feats["peer_valuation_composite_zscore"] = np.nan
+
     return feats
+
+
+# ── Catalyst Detection ───────────────────────────────────────────────
+
+
+def compute_catalyst_score(
+    deep_fund: dict,
+    alt_data: dict | None = None,
+) -> dict:
+    """Score 0-3 catalyst signals from fundamental and alternative data.
+
+    Each catalyst contributes 0 or 1 to the total score:
+    1. Insider cluster buying (3+ buys in 30 days)
+    2. Revenue acceleration (QoQ growth accelerating)
+    3. Operating margin trending up (4Q trend > 1%)
+    """
+    catalyst_insider = False
+    catalyst_rev_accel = False
+    catalyst_margin = False
+
+    # 1. Insider buying
+    insider_buy = deep_fund.get("insider_cluster_buy")
+    if insider_buy is not None and not (isinstance(insider_buy, float) and np.isnan(insider_buy)):
+        catalyst_insider = bool(insider_buy)
+
+    # 2. Revenue acceleration
+    rev_accel = deep_fund.get("revenue_acceleration")
+    if rev_accel is not None and isinstance(rev_accel, (int, float)) and not np.isnan(rev_accel):
+        catalyst_rev_accel = rev_accel > 0
+
+    # 3. Operating margin trending up (>1% slope)
+    om_trend = deep_fund.get("operating_margin_4q_trend")
+    if om_trend is not None and isinstance(om_trend, (int, float)) and not np.isnan(om_trend):
+        catalyst_margin = om_trend > 0.01
+
+    score = int(catalyst_insider) + int(catalyst_rev_accel) + int(catalyst_margin)
+
+    return {
+        "catalyst_score": score,
+        "catalyst_insider_buying": catalyst_insider,
+        "catalyst_revenue_accelerating": catalyst_rev_accel,
+        "catalyst_margin_expanding": catalyst_margin,
+    }
 
 
 # ── Category 8: Institutional Blind-Spot Detection ───────────────────

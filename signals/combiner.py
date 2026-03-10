@@ -8,12 +8,8 @@ import pandas as pd
 from signals.technical import compute_all_technical
 from signals.fundamental import compute_fundamental_signals
 from signals.macro import compute_macro_signals
-from signals.microstructure import compute_microstructure_features
 from signals.statistical import compute_statistical_features
-from signals.calendar_features import compute_calendar_features
 from signals.cross_sectional import compute_cross_sectional_features
-from signals.interactions import compute_interaction_features
-from signals.network_analysis import compute_network_features
 from signals.fundamental_deep import (
     compute_deep_fundamentals,
     compute_industry_relative_metrics,
@@ -35,6 +31,7 @@ class SignalCombiner:
         statements: dict[str, dict] | None = None,
         alt_data: dict[str, dict] | None = None,
         risk_free_rate: float = 0.04,
+        feature_set: str = "value",
     ) -> pd.DataFrame:
         """Build the combined feature matrix.
 
@@ -46,6 +43,9 @@ class SignalCombiner:
         statements : {ticker: dict of financial statements} (optional, for deep fundamentals)
         alt_data : {ticker: {insider_df, holders_df, short_df}} (optional)
         risk_free_rate : 10Y Treasury rate for DCF calculations
+        feature_set : "value" skips noise modules (microstructure, calendar,
+            network, interactions). "full" includes everything for backward
+            compatibility.
 
         Returns
         -------
@@ -58,20 +58,26 @@ class SignalCombiner:
         fund_signals = compute_fundamental_signals(fundamentals)
 
         # Compute calendar features once (shared across all tickers)
-        all_dates = set()
-        for price_df in prices.values():
-            all_dates.update(price_df.index)
-        if all_dates:
-            calendar_idx = pd.DatetimeIndex(sorted(all_dates))
-            calendar_features = compute_calendar_features(calendar_idx)
-        else:
-            calendar_features = pd.DataFrame()
+        if feature_set == "full":
+            from signals.calendar_features import compute_calendar_features
+
+            all_dates = set()
+            for price_df in prices.values():
+                all_dates.update(price_df.index)
+            if all_dates:
+                calendar_idx = pd.DatetimeIndex(sorted(all_dates))
+                calendar_features = compute_calendar_features(calendar_idx)
+            else:
+                calendar_features = pd.DataFrame()
 
         # Compute network features once (cross-asset correlations)
-        try:
-            network_features = compute_network_features(prices, window=60)
-        except Exception:
-            network_features = pd.DataFrame()
+        if feature_set == "full":
+            from signals.network_analysis import compute_network_features
+
+            try:
+                network_features = compute_network_features(prices, window=60)
+            except Exception:
+                network_features = pd.DataFrame()
 
         # ── Deep Fundamentals: DCF + quarterly trends + institutional blindspot ──
         deep_fund_map: dict[str, dict] = {}
@@ -132,7 +138,10 @@ class SignalCombiner:
             tech = compute_all_technical(price_df)
 
             # Microstructure signals
-            micro = compute_microstructure_features(price_df)
+            if feature_set == "full":
+                from signals.microstructure import compute_microstructure_features
+
+                micro = compute_microstructure_features(price_df)
 
             # Statistical regime signals
             stat = compute_statistical_features(price_df)
@@ -141,11 +150,12 @@ class SignalCombiner:
             macro_aligned = macro_signals.reindex(tech.index, method="ffill")
 
             # Calendar features aligned
-            cal_aligned = (
-                calendar_features.reindex(tech.index, method="nearest")
-                if len(calendar_features) > 0
-                else pd.DataFrame(index=tech.index)
-            )
+            if feature_set == "full":
+                cal_aligned = (
+                    calendar_features.reindex(tech.index, method="nearest")
+                    if len(calendar_features) > 0
+                    else pd.DataFrame(index=tech.index)
+                )
 
             # Fundamental signals are static per ticker — broadcast
             fund_row = {}
@@ -156,8 +166,9 @@ class SignalCombiner:
             combined = tech.copy()
 
             # Add microstructure features
-            for col in micro.columns:
-                combined[f"micro_{col}"] = micro[col]
+            if feature_set == "full":
+                for col in micro.columns:
+                    combined[f"micro_{col}"] = micro[col]
 
             # Add statistical features
             for col in stat.columns:
@@ -168,8 +179,9 @@ class SignalCombiner:
                 combined[f"macro_{col}"] = macro_aligned[col]
 
             # Add calendar features
-            for col in cal_aligned.columns:
-                combined[f"cal_{col}"] = cal_aligned[col]
+            if feature_set == "full":
+                for col in cal_aligned.columns:
+                    combined[f"cal_{col}"] = cal_aligned[col]
 
             # Add fundamental features (original simple)
             for key, val in fund_row.items():
@@ -191,9 +203,10 @@ class SignalCombiner:
                     combined[f"fund_{key}"] = val
 
             # Add network features (static per ticker)
-            if len(network_features) > 0 and ticker in network_features.index:
-                for col in network_features.columns:
-                    combined[col] = float(network_features.loc[ticker, col])
+            if feature_set == "full":
+                if len(network_features) > 0 and ticker in network_features.index:
+                    for col in network_features.columns:
+                        combined[col] = float(network_features.loc[ticker, col])
 
             combined["ticker"] = ticker
             rows.append(combined)
@@ -209,7 +222,10 @@ class SignalCombiner:
         result = compute_cross_sectional_features(result)
 
         # Add interaction features
-        result = compute_interaction_features(result)
+        if feature_set == "full":
+            from signals.interactions import compute_interaction_features
+
+            result = compute_interaction_features(result)
 
         return result
 

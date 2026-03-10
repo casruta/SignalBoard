@@ -37,10 +37,10 @@ strategy:
   push_notification_threshold: 0.75
 
 model:
-  target_horizon_days: 10
+  target_horizon_days: 63          # 1 quarter (~63 trading days) for fundamental catalysts
   target_threshold: "adaptive"
-  train_window_years: 2
-  validation_window_months: 3
+  train_window_years: 4
+  validation_window_months: 6
   retrain_frequency_days: 30
   use_ensemble: false              # Train StackingEnsemble (LightGBM + XGBoost + Ridge)
   calibrate_probabilities: true    # Fit isotonic calibration on validation set

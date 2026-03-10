@@ -171,7 +171,7 @@ class WalkForwardTrainer:
         train_window_years: int = 2,
         val_window_months: int = 3,
         target_horizon_days: int = 5,
-        embargo_days: int = 5,
+        embargo_days: int = 10,
         num_boost_rounds: int = 500,
         early_stopping_rounds: int = 50,
         keep_last_n_models: int = 3,
