@@ -209,74 +209,74 @@ class TestSafetyFilter:
         screener = DynamicScreener()
         info, deep, dcf = self._healthy()
         info["marketCap"] = 200_000_000  # $200M < $300M
-        assert screener._apply_safety_filters(info, deep, dcf=dcf) is False
+        assert screener._apply_safety_filters(info, deep, dcf=dcf)[0] is False
 
     def test_blocks_missing_market_cap(self):
         screener = DynamicScreener()
         _, deep, dcf = self._healthy()
-        assert screener._apply_safety_filters({}, deep, dcf=dcf) is False
+        assert screener._apply_safety_filters({}, deep, dcf=dcf)[0] is False
 
     def test_passes_healthy_stock(self):
         screener = DynamicScreener()
         info, deep, dcf = self._healthy()
-        assert screener._apply_safety_filters(info, deep, dcf=dcf) is True
+        assert screener._apply_safety_filters(info, deep, dcf=dcf)[0] is True
 
     def test_blocks_low_altman_z(self):
         screener = DynamicScreener()
         info, deep, dcf = self._healthy()
         deep["altman_z_score"] = 1.5
-        assert screener._apply_safety_filters(info, deep, dcf=dcf) is False
+        assert screener._apply_safety_filters(info, deep, dcf=dcf)[0] is False
 
     def test_blocks_grey_zone_altman_z(self):
         screener = DynamicScreener()
         info, deep, dcf = self._healthy()
         deep["altman_z_score"] = 2.5
-        assert screener._apply_safety_filters(info, deep, dcf=dcf) is False
+        assert screener._apply_safety_filters(info, deep, dcf=dcf)[0] is False
 
     def test_blocks_altman_z_at_boundary(self):
         screener = DynamicScreener()
         info, deep, dcf = self._healthy()
         deep["altman_z_score"] = 3.0
-        assert screener._apply_safety_filters(info, deep, dcf=dcf) is False
+        assert screener._apply_safety_filters(info, deep, dcf=dcf)[0] is False
         deep["altman_z_score"] = 3.01
-        assert screener._apply_safety_filters(info, deep, dcf=dcf) is True
+        assert screener._apply_safety_filters(info, deep, dcf=dcf)[0] is True
 
     def test_altman_z_threshold_from_config(self):
         screener = DynamicScreener()
         info, deep, dcf = self._healthy()
         deep["altman_z_score"] = 2.0
         config = {"screening": {"min_altman_z": 1.81}}
-        assert screener._apply_safety_filters(info, deep, dcf=dcf, config=config) is True
+        assert screener._apply_safety_filters(info, deep, dcf=dcf, config=config)[0] is True
 
     def test_blocks_insufficient_quarters(self):
         screener = DynamicScreener()
         info, deep, dcf = self._healthy()
         deep["quarters_available"] = 3  # need >= 4
-        assert screener._apply_safety_filters(info, deep, dcf=dcf) is False
+        assert screener._apply_safety_filters(info, deep, dcf=dcf)[0] is False
 
     def test_blocks_declining_revenue(self):
         screener = DynamicScreener()
         info, deep, dcf = self._healthy()
         info["revenueGrowth"] = -0.05  # negative growth
-        assert screener._apply_safety_filters(info, deep, dcf=dcf) is False
+        assert screener._apply_safety_filters(info, deep, dcf=dcf)[0] is False
 
     def test_blocks_low_piotroski(self):
         screener = DynamicScreener()
         info, deep, dcf = self._healthy()
         deep["piotroski_f_score"] = 4  # need >= 5
-        assert screener._apply_safety_filters(info, deep, dcf=dcf) is False
+        assert screener._apply_safety_filters(info, deep, dcf=dcf)[0] is False
 
     def test_blocks_negative_fcf(self):
         screener = DynamicScreener()
         info, deep, dcf = self._healthy()
         dcf["fcf_yield"] = -0.02  # negative FCF
-        assert screener._apply_safety_filters(info, deep, dcf=dcf) is False
+        assert screener._apply_safety_filters(info, deep, dcf=dcf)[0] is False
 
     def test_blocks_value_destroying_roic(self):
         screener = DynamicScreener()
         info, deep, dcf = self._healthy()
         dcf["roic_vs_wacc_spread"] = -0.02  # ROIC < WACC
-        assert screener._apply_safety_filters(info, deep, dcf=dcf) is False
+        assert screener._apply_safety_filters(info, deep, dcf=dcf)[0] is False
 
     def test_blocks_weak_quick_ratio_for_tech(self):
         """Tech sector uses quick ratio (not current ratio) for liquidity gate."""
@@ -284,7 +284,7 @@ class TestSafetyFilter:
         info, deep, dcf = self._healthy()
         info["sector"] = "Technology"
         deep["quick_ratio"] = 0.5  # below 0.8 threshold
-        assert screener._apply_safety_filters(info, deep, dcf=dcf) is False
+        assert screener._apply_safety_filters(info, deep, dcf=dcf)[0] is False
 
     def test_uses_current_ratio_for_industrials(self):
         """Industrials (inventory-heavy) still use current ratio >= 1.0."""
@@ -292,7 +292,7 @@ class TestSafetyFilter:
         info, deep, dcf = self._healthy()
         info["sector"] = "Industrials"
         deep["current_ratio"] = 0.7
-        assert screener._apply_safety_filters(info, deep, dcf=dcf) is False
+        assert screener._apply_safety_filters(info, deep, dcf=dcf)[0] is False
 
     def test_quick_ratio_fallback_to_current_ratio(self):
         """When quick ratio is missing for non-manufacturing, falls back to current ratio."""
@@ -301,7 +301,7 @@ class TestSafetyFilter:
         info["sector"] = "Technology"
         deep.pop("quick_ratio", None)
         deep["current_ratio"] = 0.7
-        assert screener._apply_safety_filters(info, deep, dcf=dcf) is False
+        assert screener._apply_safety_filters(info, deep, dcf=dcf)[0] is False
 
     # ── New Damodaran gates ──────────────────────────────────────────
 
@@ -310,35 +310,35 @@ class TestSafetyFilter:
         screener = DynamicScreener()
         info, deep, dcf = self._healthy()
         info["averageVolume"] = 50_000  # below 100k threshold
-        assert screener._apply_safety_filters(info, deep, dcf=dcf) is False
+        assert screener._apply_safety_filters(info, deep, dcf=dcf)[0] is False
 
     def test_passes_when_volume_missing(self):
         """If volume data is missing, don't block (fail open for data gaps)."""
         screener = DynamicScreener()
         info, deep, dcf = self._healthy()
         info.pop("averageVolume", None)
-        assert screener._apply_safety_filters(info, deep, dcf=dcf) is True
+        assert screener._apply_safety_filters(info, deep, dcf=dcf)[0] is True
 
     def test_blocks_insufficient_margin_of_safety(self):
         """Damodaran: require >= 15% DCF upside before recommending buy."""
         screener = DynamicScreener()
         info, deep, dcf = self._healthy()
         dcf["dcf_upside_pct"] = 0.10  # 10% upside < 15% threshold
-        assert screener._apply_safety_filters(info, deep, dcf=dcf) is False
+        assert screener._apply_safety_filters(info, deep, dcf=dcf)[0] is False
 
     def test_passes_at_margin_of_safety_threshold(self):
         """Exactly 15% upside should pass."""
         screener = DynamicScreener()
         info, deep, dcf = self._healthy()
         dcf["dcf_upside_pct"] = 0.15  # exactly 15%
-        assert screener._apply_safety_filters(info, deep, dcf=dcf) is True
+        assert screener._apply_safety_filters(info, deep, dcf=dcf)[0] is True
 
     def test_passes_when_dcf_upside_missing(self):
         """If DCF upside is NaN (data gap), don't block."""
         screener = DynamicScreener()
         info, deep, dcf = self._healthy()
         dcf.pop("dcf_upside_pct", None)
-        assert screener._apply_safety_filters(info, deep, dcf=dcf) is True
+        assert screener._apply_safety_filters(info, deep, dcf=dcf)[0] is True
 
     def test_margin_of_safety_configurable(self):
         """Config can override the 15% default."""
@@ -346,7 +346,7 @@ class TestSafetyFilter:
         info, deep, dcf = self._healthy()
         dcf["dcf_upside_pct"] = 0.08  # 8% — would fail default 15%
         config = {"screening": {"min_margin_of_safety": 0.05}}
-        assert screener._apply_safety_filters(info, deep, dcf=dcf, config=config) is True
+        assert screener._apply_safety_filters(info, deep, dcf=dcf, config=config)[0] is True
 
 
 

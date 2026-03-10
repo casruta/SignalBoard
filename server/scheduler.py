@@ -61,7 +61,7 @@ async def run_daily_pipeline(config: dict | None = None) -> list[dict]:
         logger.info("Step 2: Computing signals...")
         combiner = SignalCombiner()
         feature_matrix = combiner.build_feature_matrix(prices, fundamentals, macro)
-        feature_matrix = add_target(feature_matrix, prices, horizon_days=5)
+        feature_matrix = add_target(feature_matrix, prices, horizon_days=config["model"]["target_horizon_days"])
 
         logger.info("Step 3: Running ML predictions...")
         registry = ModelRegistry()

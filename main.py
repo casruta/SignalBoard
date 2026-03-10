@@ -381,43 +381,26 @@ def cmd_screen(config: dict):
         except Exception:
             pass
 
-    # Determine macro regime from VIX
-    macro_regime = "neutral"
-    try:
-        if "vix" in macro.columns:
-            vix = macro["vix"].dropna().iloc[-1]
-            if vix > 25:
-                macro_regime = "risk_off"
-            elif vix < 15:
-                macro_regime = "risk_on"
-            logger.info("VIX: %.1f → macro regime: %s", vix, macro_regime)
-    except Exception:
-        pass
-
     # Run screener
     screener = DynamicScreener(top_n=config.get("screening", {}).get("top_n", 50))
-    scores_df = screener.compute_composite_scores(
-        deep_fund_map, dcf_map, info_map, macro_regime, config=config,
-        price_data=prices,
+    scores_df = screener.compute_dcf_rankings(
+        deep_fund_map, dcf_map, info_map, config=config,
     )
 
     logger.info("\n=== Top Stocks by Composite Quality Score ===")
-    logger.info("%-6s  %-8s  %-6s  %-6s  %-6s  %-6s  %-6s  %-6s  %-6s  %-6s  %-6s  %s",
-                "Rank", "Ticker", "Score", "Piotr", "ROIC", "CFlow", "BSheet", "DCF", "Blind", "Mom", "LVol", "Safe")
+    logger.info("%-6s  %-8s  %-10s  %-10s  %-8s  %-6s  %-6s  %-8s  %s",
+                "Rank", "Ticker", "DCF Up%", "MoS%", "WACC", "Piotr", "AltZ", "FCF Yld", "Safe")
     for _, row in scores_df.head(30).iterrows():
         logger.info(
-            "%-6d  %-8s  %.3f   %.3f   %.3f   %.3f   %.3f   %.3f   %.3f   %.3f   %.3f   %s",
+            "%-6d  %-8s  %+9.1f%%   %+9.1f%%   %.4f  %.0f     %.1f   %+.1f%%    %s",
             int(row.get("rank", 0)),
             row.get("ticker", ""),
-            row.get("composite_score", 0),
-            row.get("piotroski_score", 0),
-            row.get("roic_spread_score", 0),
-            row.get("cash_flow_score", 0),
-            row.get("balance_sheet_score", 0),
-            row.get("dcf_score", 0),
-            row.get("blindspot_score", 0),
-            row.get("momentum_score", 0),
-            row.get("low_vol_score", 0),
+            row.get("dcf_upside_pct", 0) * 100,
+            row.get("margin_of_safety", 0) * 100,
+            row.get("wacc", 0),
+            row.get("piotroski_f_score", 0),
+            row.get("altman_z_score", 0),
+            row.get("fcf_yield", 0) * 100,
             "YES" if row.get("passes_safety", False) else "NO",
         )
 

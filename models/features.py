@@ -39,7 +39,7 @@ def add_target(
         vol_20 = daily_ret.rolling(20).std()
         vol_aligned = vol_20.reindex(group.index.get_level_values("date")).values
 
-        classes, thresholds = _classify_adaptive(ret.values, vol_aligned)
+        classes, thresholds = _classify_adaptive(ret.values, vol_aligned, horizon_days=horizon_days)
 
         ticker_targets = pd.DataFrame(
             {
@@ -204,6 +204,7 @@ def _classify_adaptive(
     returns: np.ndarray,
     volatilities: np.ndarray,
     sigma_threshold: float = 0.8,
+    horizon_days: int = 1,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Classify returns using volatility-adjusted thresholds.
 
@@ -221,7 +222,7 @@ def _classify_adaptive(
     -------
     (classes, thresholds) : classification array and per-row threshold used
     """
-    thresholds = sigma_threshold * np.abs(volatilities)
+    thresholds = sigma_threshold * np.sqrt(horizon_days / 20) * np.abs(volatilities)
     # Fallback to 1% when volatility is NaN or zero
     thresholds = np.where(
         np.isnan(thresholds) | (thresholds <= 0), 0.01, thresholds
