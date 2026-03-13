@@ -35,8 +35,8 @@ def fetch_insider_transactions(
         if insider is None or insider.empty:
             return pd.DataFrame()
         return insider
-    except Exception as e:
-        logger.debug("Failed to fetch insider data for %s: %s", ticker, e)
+    except (ConnectionError, TimeoutError, ValueError, KeyError) as e:
+        logger.warning("Failed to fetch insider data for %s: %s", ticker, e)
         return pd.DataFrame()
 
 
@@ -80,8 +80,8 @@ def compute_insider_signals(
                 df.iloc[i, df.columns.get_loc("insider_buy_ratio_30d")] = buys / total if total > 0 else np.nan
                 df.iloc[i, df.columns.get_loc("insider_net_shares_30d")] = float(window["shares"].sum())
                 df.iloc[i, df.columns.get_loc("insider_transaction_count_30d")] = total
-    except Exception as e:
-        logger.debug("Error computing insider signals: %s", e)
+    except (ValueError, KeyError, TypeError) as e:
+        logger.warning("Error computing insider signals: %s", e)
 
     return df
 
@@ -103,8 +103,8 @@ def fetch_short_interest_proxy(ticker: str) -> pd.DataFrame:
             "shares_outstanding": info.get("sharesOutstanding", np.nan),
             "short_pct_float": info.get("shortPercentOfFloat", np.nan),
         }])
-    except Exception as e:
-        logger.debug("Failed to fetch short interest for %s: %s", ticker, e)
+    except (ConnectionError, TimeoutError, ValueError, KeyError) as e:
+        logger.warning("Failed to fetch short interest for %s: %s", ticker, e)
         return pd.DataFrame()
 
 
@@ -134,8 +134,8 @@ def fetch_institutional_holders(ticker: str) -> pd.DataFrame:
         if holders is None or holders.empty:
             return pd.DataFrame()
         return holders
-    except Exception as e:
-        logger.debug("Failed to fetch institutional holders for %s: %s", ticker, e)
+    except (ConnectionError, TimeoutError, ValueError, KeyError) as e:
+        logger.warning("Failed to fetch institutional holders for %s: %s", ticker, e)
         return pd.DataFrame()
 
 
@@ -165,5 +165,6 @@ def compute_institutional_signals(holders_df: pd.DataFrame) -> dict:
             "inst_holder_count": count,
             "inst_top10_pct": float(top10_pct) if not pd.isna(top10_pct) else np.nan,
         }
-    except Exception:
+    except (ValueError, KeyError, TypeError):
+        logger.warning("Error computing institutional signals")
         return {"inst_holder_count": np.nan, "inst_top10_pct": np.nan}
