@@ -727,7 +727,11 @@ def generate_mock_report(signal: dict) -> dict:
         dp = real_iv
         dcf["output"]["implied_price"] = round(dp, 2)
     dcf["output"]["current_price"] = price
-    dcf["output"]["upside_pct"] = round(dp/price-1, 4) if price else 0
+    real_upside = signal.get("real_dcf_upside_pct")
+    if real_upside is not None:
+        dcf["output"]["upside_pct"] = round(real_upside, 4)
+    else:
+        dcf["output"]["upside_pct"] = round(dp/price-1, 4) if price else 0
     cp = [iv["implied_price"] for iv in comps["implied_valuation"] if iv["implied_price"] > 0]
     ca = sum(cp)/len(cp) if cp else dp
     tt = signal.get("take_profit", price*1.08)
@@ -886,7 +890,7 @@ def generate_mock_report(signal: dict) -> dict:
     return {
         "header":{"ticker":signal["ticker"],"name":signal.get("short_name",""),"sector":sec,
             "industry":sec,"exchange":"NASDAQ","date":datetime.now().strftime("%Y-%m-%d"),
-            "rating":rat,"price_target":round(dp,2),"current_price":price,"upside_pct":round(dp/price-1,4) if price else 0},
+            "rating":rat,"price_target":round(dp,2),"current_price":price,"upside_pct":round(real_upside, 4) if real_upside is not None else (round(dp/price-1,4) if price else 0)},
         "thesis":{"text":f"{rat} with ${dp:.2f} price target ({dp/price-1:+.1%} upside). "
                          f"{signal.get('ml_insight','')} "
                          f"Trading at {p['ev_rev']:.1f}x EV/Revenue vs "

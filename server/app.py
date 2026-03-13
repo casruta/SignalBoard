@@ -197,6 +197,8 @@ def _build_signal_from_screened(screened: dict) -> dict:
                        else f"Screened stock with {dcf_upside * 100:+.0f}% DCF upside."),
         "risk_context": "Valuation based on DCF model assumptions. "
                         "Actual results may differ materially from projections.",
+        "intrinsic_value_per_share": iv,
+        "real_dcf_upside_pct": dcf_upside,
     }
 
 
@@ -273,6 +275,27 @@ async def trigger_pipeline():
     """Manually trigger the daily pipeline (for testing)."""
     results = await run_daily_pipeline(_config)
     return {"status": "complete", "signals_generated": len(results)}
+
+
+# ── Article endpoints ────────────────────────────────────────
+
+@app.get("/articles")
+async def get_articles(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
+    """Get published thesis articles, newest first."""
+    articles = _db.get_articles(limit=limit, offset=offset)
+    return {"articles": articles, "count": len(articles)}
+
+
+@app.get("/articles/{slug}")
+async def get_article_by_slug(slug: str):
+    """Get a single thesis article by slug."""
+    article = _db.get_article_by_slug(slug)
+    if article is None:
+        raise HTTPException(status_code=404, detail=f"Article not found: {slug}")
+    return article
 
 
 @app.get("/investor-report/{ticker}")
@@ -382,6 +405,16 @@ async def get_report(ticker: str):
 # ── Web frontend ─────────────────────────────────────────────
 
 _web_dir = Path(__file__).resolve().parent.parent / "web"
+
+
+@app.get("/articles.html")
+async def articles_page():
+    return FileResponse(_web_dir / "articles.html")
+
+
+@app.get("/article.html")
+async def article_page():
+    return FileResponse(_web_dir / "article.html")
 
 
 @app.get("/detail.html")
