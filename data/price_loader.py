@@ -82,7 +82,7 @@ def fetch_prices_bulk(
                 t, df = future.result()
                 if not df.empty:
                     results[t] = df
-            except Exception as e:
+            except (ConnectionError, TimeoutError, OSError, ValueError, KeyError) as e:
                 logger.warning("Price fetch failed for %s: %s", ticker, e)
 
     return results

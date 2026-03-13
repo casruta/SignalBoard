@@ -153,7 +153,7 @@ class FinancialStatementLoader:
                 try:
                     key, data = future.result()
                     results[key] = data
-                except Exception:
+                except (ConnectionError, TimeoutError, requests.exceptions.RequestException, OSError, ValueError, KeyError):
                     logger.exception("Failed to fetch statements for %s", ticker)
 
         return results
@@ -179,16 +179,16 @@ class FinancialStatementLoader:
                         # downstream modules (dcf_valuation, fundamental_deep)
                         # expect line items in the index.
                         result[key] = raw
-                except Exception:
-                    logger.debug("yfinance %s failed for %s", yf_attr, ticker)
+                except (ConnectionError, TimeoutError, ValueError, KeyError):
+                    logger.warning("yfinance %s failed for %s", yf_attr, ticker)
 
             try:
                 result["info"] = t.info or {}
-            except Exception:
-                logger.debug("yfinance info failed for %s", ticker)
+            except (ConnectionError, TimeoutError, ValueError, KeyError):
+                logger.warning("yfinance info failed for %s", ticker)
 
-        except Exception:
-            logger.exception("yfinance fetch failed entirely for %s", ticker)
+        except (ConnectionError, TimeoutError, ValueError, KeyError):
+            logger.warning("yfinance fetch failed entirely for %s", ticker)
 
         return result
 
@@ -219,8 +219,8 @@ class FinancialStatementLoader:
             resp = requests.get(url, params=params, timeout=15)
             resp.raise_for_status()
             data = resp.json()
-        except Exception:
-            logger.exception("FMP request failed for %s %s", ticker, statement_type)
+        except (ConnectionError, TimeoutError, requests.exceptions.RequestException, ValueError):
+            logger.warning("FMP request failed for %s %s", ticker, statement_type, exc_info=True)
             return pd.DataFrame()
 
         if not data or not isinstance(data, list):
@@ -267,14 +267,15 @@ class FinancialStatementLoader:
             path.parent.mkdir(parents=True, exist_ok=True)
             df.to_parquet(path)
             logger.debug("Cached %s", path)
-        except Exception:
-            logger.debug("Failed to cache %s", path, exc_info=True)
+        except OSError:
+            logger.warning("Failed to cache %s", path, exc_info=True)
 
     def _load_cache(self, path: Path) -> pd.DataFrame:
         """Load a DataFrame from a parquet cache file."""
         try:
             return pd.read_parquet(path)
-        except Exception:
+        except (OSError, ValueError):
+            logger.warning("Failed to load cache %s", path, exc_info=True)
             return pd.DataFrame()
 
     # ------------------------------------------------------------------
@@ -298,8 +299,8 @@ class FinancialStatementLoader:
         # cheap relative to statements and required for market cap, beta, etc.
         try:
             result["info"] = yf.Ticker(ticker).info or {}
-        except Exception:
-            logger.debug("yfinance info re-fetch failed for %s (cache hit)", ticker)
+        except (ConnectionError, TimeoutError, ValueError, KeyError):
+            logger.warning("yfinance info re-fetch failed for %s (cache hit)", ticker)
             result["info"] = {}
         result["source"] = "cache"
         logger.debug("Cache hit for %s (all statements)", ticker)

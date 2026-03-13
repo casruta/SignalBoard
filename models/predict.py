@@ -69,6 +69,11 @@ def predict_latest(
     latest_date = dates.max()
     latest = feature_matrix.loc[latest_date]
 
+    # When only one ticker exists for latest_date, .loc returns a Series
+    # whose index is feature columns, not tickers. Normalize to DataFrame.
+    if isinstance(latest, pd.Series):
+        latest = latest.to_frame(name=latest.name).T
+
     # Ensure we only pass numeric feature columns
     non_feature = ["target_return", "target_class"]
     feature_cols = [
@@ -78,10 +83,12 @@ def predict_latest(
     X = latest[feature_cols].fillna(latest[feature_cols].median())
 
     probs = model.predict(X)
+    if probs.ndim == 1:
+        probs = probs.reshape(1, -1)
     predicted_classes = np.argmax(probs, axis=1)
 
     predictions = []
-    tickers = latest.index if isinstance(latest.index, pd.Index) else [latest.name]
+    tickers = latest.index
 
     for i, ticker in enumerate(tickers):
         cls = predicted_classes[i]

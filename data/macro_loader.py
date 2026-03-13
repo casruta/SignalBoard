@@ -1,9 +1,12 @@
 """Fetch macroeconomic indicators from FRED API."""
 
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 CACHE_DIR = Path(__file__).parent / "cache" / "macro"
 
@@ -102,7 +105,8 @@ def fetch_all_macro(
                 force_refresh=force_refresh,
             )
             frames[name] = s
-        except Exception:
+        except (ConnectionError, TimeoutError, OSError, ValueError, KeyError) as e:
+            logger.warning("Failed to fetch macro series '%s': %s", name, e)
             continue
 
     if not frames:

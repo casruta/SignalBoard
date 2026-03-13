@@ -4,13 +4,14 @@ import asyncio
 import json
 import logging
 import math
+import re
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query, Path as PathParam
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config_loader import load_config
@@ -19,6 +20,24 @@ from server.mock_financials import generate_mock_report
 from server.scheduler import run_daily_pipeline
 
 logger = logging.getLogger(__name__)
+
+# ── Validation constants ────────────────────────────────────────
+TICKER_PATTERN = re.compile(r"^[A-Z]{1,5}(\.[A-Z]{1,5})?$")
+DEVICE_TOKEN_PATTERN = re.compile(r"^[0-9a-fA-F]{64,200}$")
+
+MAX_SCREENED_LIMIT = 200
+
+
+def _validate_ticker(ticker: str) -> str:
+    """Validate and normalise a ticker symbol. Raises HTTPException on failure."""
+    upper = ticker.upper()
+    if not TICKER_PATTERN.match(upper):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid ticker format: {ticker!r}. "
+                   "Expected 1-5 uppercase letters, optionally followed by .CLASS (e.g. AAPL, BRK.B).",
+        )
+    return upper
 
 
 def _sanitize_for_json(obj):
@@ -56,6 +75,15 @@ _scheduler = None
 
 class DeviceTokenRequest(BaseModel):
     token: str
+
+    @field_validator("token")
+    @classmethod
+    def validate_token(cls, v: str) -> str:
+        if not DEVICE_TOKEN_PATTERN.match(v):
+            raise ValueError(
+                "Invalid device token: must be a hex string of 64-200 characters"
+            )
+        return v
 
 
 # ── Lifecycle ────────────────────────────────────────────────────
@@ -169,6 +197,8 @@ def _build_signal_from_screened(screened: dict) -> dict:
                        else f"Screened stock with {dcf_upside * 100:+.0f}% DCF upside."),
         "risk_context": "Valuation based on DCF model assumptions. "
                         "Actual results may differ materially from projections.",
+        "intrinsic_value_per_share": iv,
+        "real_dcf_upside_pct": dcf_upside,
     }
 
 
@@ -209,9 +239,10 @@ async def get_signal_history(limit: int = 100):
 @app.get("/signals/{ticker}")
 async def get_signal_detail(ticker: str):
     """Get full recommendation detail for a ticker."""
-    detail = _db.get_signal_detail(ticker.upper())
+    ticker_upper = _validate_ticker(ticker)
+    detail = _db.get_signal_detail(ticker_upper)
     if detail is None:
-        raise HTTPException(status_code=404, detail=f"No signal found for {ticker}")
+        raise HTTPException(status_code=404, detail=f"No signal found for {ticker_upper}")
     return detail
 
 
@@ -223,7 +254,7 @@ async def register_device_token(req: DeviceTokenRequest):
 
 
 @app.get("/screened")
-async def get_screened_stocks(limit: int = 20):
+async def get_screened_stocks(limit: int = Query(default=20, ge=1, le=MAX_SCREENED_LIMIT)):
     """Get dynamically screened stocks ranked by DCF undervaluation."""
     stocks = _db.get_screened_stocks(limit=limit)
     return _sanitize_for_json({"stocks": stocks, "count": len(stocks)})
@@ -232,9 +263,10 @@ async def get_screened_stocks(limit: int = 20):
 @app.get("/screened/{ticker}")
 async def get_screened_stock_detail(ticker: str):
     """Get full analysis detail for a screened stock."""
-    detail = _db.get_screened_stock_detail(ticker.upper())
+    ticker_upper = _validate_ticker(ticker)
+    detail = _db.get_screened_stock_detail(ticker_upper)
     if detail is None:
-        raise HTTPException(status_code=404, detail=f"No screened data for {ticker}")
+        raise HTTPException(status_code=404, detail=f"No screened data for {ticker_upper}")
     return _sanitize_for_json(detail)
 
 
@@ -245,10 +277,31 @@ async def trigger_pipeline():
     return {"status": "complete", "signals_generated": len(results)}
 
 
+# ── Article endpoints ────────────────────────────────────────
+
+@app.get("/articles")
+async def get_articles(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
+    """Get published thesis articles, newest first."""
+    articles = _db.get_articles(limit=limit, offset=offset)
+    return {"articles": articles, "count": len(articles)}
+
+
+@app.get("/articles/{slug}")
+async def get_article_by_slug(slug: str):
+    """Get a single thesis article by slug."""
+    article = _db.get_article_by_slug(slug)
+    if article is None:
+        raise HTTPException(status_code=404, detail=f"Article not found: {slug}")
+    return article
+
+
 @app.get("/investor-report/{ticker}")
 async def get_investor_report(ticker: str):
     """Generate a concise investor report in markdown for a ticker."""
-    ticker_upper = ticker.upper()
+    ticker_upper = _validate_ticker(ticker)
     screened = _db.get_screened_stock_detail(ticker_upper)
     if screened is None:
         raise HTTPException(status_code=404, detail="No screened data found")
@@ -335,7 +388,7 @@ async def get_investor_report(ticker: str):
 @app.get("/report/{ticker}")
 async def get_report(ticker: str):
     """Generate a full financial report for a ticker."""
-    ticker_upper = ticker.upper()
+    ticker_upper = _validate_ticker(ticker)
     signal_data = _db.get_signal_detail(ticker_upper)
     if signal_data is not None:
         report = generate_mock_report(signal_data)
@@ -352,6 +405,16 @@ async def get_report(ticker: str):
 # ── Web frontend ─────────────────────────────────────────────
 
 _web_dir = Path(__file__).resolve().parent.parent / "web"
+
+
+@app.get("/articles.html")
+async def articles_page():
+    return FileResponse(_web_dir / "articles.html")
+
+
+@app.get("/article.html")
+async def article_page():
+    return FileResponse(_web_dir / "article.html")
 
 
 @app.get("/detail.html")

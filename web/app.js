@@ -642,7 +642,7 @@
 
         function renderReportHeader(h) {
             if (!h) return "";
-            var ratingClass = (h.rating || "").toLowerCase().replace(/\s+/g, "-");
+            var ratingClass = (h.rating || "").toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9_-]/g, "");
             var gaugeMap = {"strong-sell": 10, "sell": 25, "hold": 50, "buy": 75, "strong-buy": 90};
             var gaugePos = gaugeMap[ratingClass] || 50;
             var upsideClass = (h.upside_pct || 0) >= 0 ? "positive" : "negative";
@@ -1063,8 +1063,8 @@
             html += '<thead><tr><th>Factor</th><th>Severity</th><th>Probability</th><th>Detail</th></tr></thead><tbody>';
             for (var i = 0; i < risks.length; i++) {
                 var r = risks[i];
-                var sevClass = (r.severity || "").toLowerCase();
-                var probClass = (r.probability || "").toLowerCase();
+                var sevClass = (r.severity || "").toLowerCase().replace(/[^a-z0-9_-]/g, "");
+                var probClass = (r.probability || "").toLowerCase().replace(/[^a-z0-9_-]/g, "");
                 html += '<tr>';
                 html += '<td>' + escapeHtml(r.factor || "") + '</td>';
                 html += '<td><span class="risk-badge ' + sevClass + '">' + escapeHtml(r.severity || "") + '</span></td>';
@@ -1120,7 +1120,7 @@
 
         function renderVerdict(v, header) {
             if (!v) return "";
-            var ratingClass = (v.rating || "").toLowerCase().replace(/\s+/g, "-");
+            var ratingClass = (v.rating || "").toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9_-]/g, "");
             var html = '<div class="verdict-box">';
             html += '<div class="verdict-rating ' + ratingClass + '">' + escapeHtml(v.rating || "") + '</div>';
             if (header && header.upside_pct != null) {
@@ -1496,13 +1496,14 @@
             if (/^#{1,3}\s/.test(line)) {
                 var level = line.match(/^(#+)/)[1].length;
                 var text = line.replace(/^#+\s*/, "");
-                html += "<h" + level + ">" + text + "</h" + level + ">";
+                html += "<h" + level + ">" + escapeHtml(text) + "</h" + level + ">";
             } else if (/^---/.test(line)) {
                 html += "<hr>";
             } else if (line.trim() === "") {
                 html += "";
             } else {
-                // Bold and italic
+                // Escape first, then apply bold and italic
+                line = escapeHtml(line);
                 line = line.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
                 line = line.replace(/\*(.+?)\*/g, "<em>$1</em>");
                 html += "<p>" + line + "</p>";

@@ -65,7 +65,7 @@ def fetch_fundamentals_bulk(
             ticker = futures[future]
             try:
                 rows.append(future.result())
-            except Exception as e:
+            except (ConnectionError, TimeoutError, OSError, ValueError, KeyError) as e:
                 logger.warning("Fundamentals fetch failed for %s: %s", ticker, e)
 
     if not rows:
